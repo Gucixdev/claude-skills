@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# gen-compare - the before/after check of a surgery: the same prompts through one or more models, greedy, outputs saved, failures counted.
+#
+# Failures counted per model: empty (no text), nostop (hit the token limit instead of ending by itself), loop (a repeated phrase or line).
+# With two models (before first, after second) it also counts identical answers and exits 1 when the second has more failures than the first.
+# Perplexity and the task metric are separate (see SKILL.md); this catches the lobotomy that numbers alone miss.
+#
+# usage: gen-compare -p PROMPTS [options] MODEL...
+#   -p FILE   one prompt per line (blank lines and lines starting with # are skipped); \n inside a line is a newline
+#   -o DIR    outputs go to DIR/MODEL/NNN.txt, summary to DIR/summary.tsv (default ./gen-compare-out)
+#   -b KIND   ollama (default) or llama (a llama-server; MODEL is only a label there)
+#   -u URL    server (default $OLLAMA_HOST or http://localhost:11434; for llama: http://localhost:8080)
+#   -n N      token limit per answer (default 512)
+#   -s N      seed (default 1); temperature is always 0
+# Exit 0 fine, 1 the last model is worse than the first, 2 bad usage or a server problem. Needs curl and jq.
+
+case ${1:-} in -h | --help) awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;; esac
+for t in curl jq; do command -v "$t" > /dev/null || { echo "gen-compare: $t not installed" >&2; exit 2; }; done
+
+prompts="" out=./gen-compare-out kind=ollama url="" ntok=512 seed=1
+while [ $# -gt 0 ]; do
+	case $1 in
+		-p | -o | -b | -u | -n | -s) [ $# -ge 2 ] || { echo "gen-compare: $1 needs a value" >&2; exit 2; } ;;
+	esac
+	case $1 in
+		-p) prompts=$2; shift ;; -o) out=$2; shift ;; -b) kind=$2; shift ;; -u) url=$2; shift ;; -n) ntok=$2; shift ;; -s) seed=$2; shift ;;
+		--) shift; break ;;
+		-*) echo "gen-compare: unknown option $1 (see --help)" >&2; exit 2 ;;
+		*) break ;;
+	esac
+	shift
+done
+[ -n "$prompts" ] && [ -f "$prompts" ] && [ $# -ge 1 ] || { echo "gen-compare: need -p PROMPTS (an existing file) and at least one MODEL (see --help)" >&2; exit 2; }
+case $kind in ollama) url=${url:-${OLLAMA_HOST:-http://localhost:11434}} ;; llama) url=${url:-http://localhost:8080} ;; *) echo "gen-compare: -b is ollama or llama" >&2; exit 2 ;; esac
+case $url in http*) ;; *) url=http://$url ;; esac
+
+# one answer: prints "stopped<TAB>tokens<TAB>text" (the text last: an empty first field would be eaten by read); non-zero when the server fails
+ask() { # MODEL PROMPT
+	local body resp
+	if [ "$kind" = ollama ]; then
+		body=$(jq -nc --arg m "$1" --arg p "$2" --argjson n "$ntok" --argjson s "$seed" '{model: $m, prompt: $p, stream: false, options: {temperature: 0, seed: $s, num_predict: $n}}')
+		resp=$(curl -sS --max-time 900 -H 'content-type: application/json' -d "$body" "$url/api/generate") || return 1
+		printf '%s' "$resp" | jq -rc 'if .error then error(.error) else [(.done_reason == "stop"), (.eval_count // 0), .response] end | @tsv' 2> /dev/null || { printf '%s' "$resp" | jq -r '.error // .' >&2; return 1; }
+	else
+		body=$(jq -nc --arg p "$2" --argjson n "$ntok" --argjson s "$seed" '{prompt: $p, n_predict: $n, temperature: 0, seed: $s, stream: false}')
+		resp=$(curl -sS --max-time 900 -H 'content-type: application/json' -d "$body" "$url/completion") || return 1
+		printf '%s' "$resp" | jq -rc 'if .error then error(.error) else [(.stop_type == "eos" or .stop_type == "word"), (.tokens_predicted // 0), .content] end | @tsv' 2> /dev/null || { printf '%s' "$resp" | jq -r '.error // .' >&2; return 1; }
+	fi
+}
+
+# loop test on the text file: a line that repeats 4+ times, or more than 40% of the 4-word windows are repeats (needs 40+ words)
+is_loop() {
+	awk '
+		{ n = split($0, w, /[ \t]+/); for (i = 1; i <= n; i++) if (w[i] != "") W[++m] = w[i]; l[$0]++; if ($0 != "" && l[$0] >= 4) rep = 1 }
+		END {
+			if (m >= 40) { for (i = 1; i + 3 <= m; i++) { k = W[i] " " W[i+1] " " W[i+2] " " W[i+3]; if (k in s) d++; s[k] = 1; t++ } if (t && d / t > 0.4) rep = 1 }
+			exit rep ? 0 : 1
+		}' "$1"
+}
+
+mkdir -p "$out" || exit 2
+: > "$out/summary.tsv"
+printf 'model\tprompt\ttokens\tstopped\tempty\tloop\n' >> "$out/summary.tsv"
+idx=0
+declare -a plist=()
+while IFS= read -r line || [ -n "$line" ]; do
+	case $line in '' | '#'*) continue ;; esac
+	plist+=("$(printf '%b' "$line")")
+done < "$prompts"
+[ ${#plist[@]} -gt 0 ] || { echo "gen-compare: no prompts in $prompts" >&2; exit 2; }
+
+for m in "$@"; do
+	d="$out/$(printf '%s' "$m" | tr '/:' '__')"
+	mkdir -p "$d"
+	idx=0
+	for p in "${plist[@]}"; do
+		idx=$((idx + 1)) f=$(printf '%s/%03d.txt' "$d" "$idx")
+		if ! r=$(ask "$m" "$p"); then echo "gen-compare: the server failed on model '$m', prompt $idx" >&2; exit 2; fi
+		IFS=$'\t' read -r stopped tokens text <<< "$r"
+		printf '%b\n' "$text" > "$f"
+		empty=0 loop=0
+		[ -z "$(printf '%s' "$text" | tr -d '[:space:]')" ] && empty=1
+		is_loop "$f" && loop=1
+		printf '%s\t%d\t%s\t%s\t%d\t%d\n' "$m" "$idx" "$tokens" "$stopped" "$empty" "$loop" >> "$out/summary.tsv"
+	done
+done
+
+echo "model                           prompts  empty  nostop  loop"
+declare -A bad=()
+first="" last=""
+for m in "$@"; do
+	row=$(awk -F'\t' -v m="$m" 'NR > 1 && $1 == m { n++; e += $5; l += $6; if ($4 == "false") ns++ } END { printf "%d %d %d %d", n, e, ns, l }' "$out/summary.tsv")
+	read -r n e ns l <<< "$row"
+	printf '%-31s %7d  %5d  %6d  %4d\n' "$m" "$n" "$e" "$ns" "$l"
+	bad[$m]=$((e + ns + l))
+	[ -z "$first" ] && first=$m
+	last=$m
+done
+rc=0
+if [ "$first" != "$last" ]; then
+	d1="$out/$(printf '%s' "$first" | tr '/:' '__')" d2="$out/$(printf '%s' "$last" | tr '/:' '__')" same=0 diffs=""
+	for ((i = 1; i <= idx; i++)); do
+		f=$(printf '%03d.txt' "$i")
+		if cmp -s "$d1/$f" "$d2/$f"; then same=$((same + 1)); elif [ "$(printf '%s' "$diffs" | wc -w)" -lt 5 ]; then diffs="$diffs $f"; fi
+	done
+	echo "identical answers: $same of $idx. Read the first differing ones by eye:"
+	for f in $diffs; do echo "  diff $d1/$f $d2/$f"; done
+	if [ "${bad[$last]}" -gt "${bad[$first]}" ]; then echo "WORSE: '$last' has ${bad[$last]} failures, '$first' has ${bad[$first]}"; rc=1; else echo "no more failures than '$first'"; fi
+fi
+echo "outputs: $out"
+exit $rc

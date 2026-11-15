@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# goal-gate - Claude Code Stop hook: Claude keeps working until a check command passes - the command decides, not a
+# model. A goal is a small bash file kept outside the project (a cloned repo can never plant one):
+#
+#   goal-gate path [DIR]   print the goal file for DIR (default .) and create its folder; a finished goal there is
+#                          moved aside first (renamed with its date, never deleted); write the new check into it
+#   goal-gate show [DIR]   print the goal for DIR or its nearest parent, with its log lines
+#
+# The goal file is comment lines, then the check, run with bash -e in the project folder; exit 0 means met. The first
+# plain comment line is the goal in words; "# max: N" caps the blocked stops (default 20); "# timeout: S" caps one run
+# of the check in seconds (default 300; keep it under the hook timeout in settings.json).
+#
+#   # every skill header is valid and the tests pass
+#   # max: 30
+#   bin/skills check
+#   bats tests/
+#
+# As the hook (no arguments, the Stop event's JSON on stdin): no goal, or one marked "# met:" or "# gave up:" - exit 0
+# and nothing happens. Otherwise the check runs. Passing: "# met: DATE" is appended and Claude stops. Failing: "# try:
+# N DATE exit RC" is appended and exit 2 hands Claude the goal and the tail of the check's output, so it keeps
+# working. Past max: "# gave up: DATE" is appended and exit 1 shows him the reason. To rerun a goal, take its "# met:"
+# or "# gave up:" line out. GOAL_GATE_DIR overrides the store (default ${XDG_STATE_HOME:-~/.local/state}/goal-gate).
+# Exit status as a command: 0 fine, 1 no goal, 2 bad usage.
+
+set -u
+
+store=${GOAL_GATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/goal-gate}
+
+usage() { sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; }
+
+key() { printf '%s' "$1" | sed 's/!/!!/g; s|/|!|g'; }	# the naming of the versions store: / as !, ! as !!
+
+find_goal() {	# find_goal DIR: "FILE<TAB>DIR" for the goal of DIR or of its nearest parent that has one
+	local d=$1
+	while :; do
+		if [ -f "$store/$(key "$d")" ]; then
+			printf '%s\t%s\n' "$store/$(key "$d")" "$d"
+			return 0
+		fi
+		[ "$d" = / ] && return 1
+		d=$(dirname "$d")
+	done
+}
+
+finished() { grep -qE '^# (met|gave up):' "$1"; }
+
+case ${1:-} in
+path)
+	d=$(cd "${2:-.}" 2> /dev/null && pwd -P) || { echo "goal-gate: no folder ${2:-.}" >&2; exit 2; }
+	mkdir -p "$store" || exit 1
+	f=$store/$(key "$d")
+	if [ -f "$f" ] && finished "$f"; then
+		mv -n -- "$f" "$f.$(date '+%Y%m%d-%H%M%S')"
+		[ -e "$f" ] && { echo "goal-gate: could not move the finished goal $f aside" >&2; exit 1; }
+	fi
+	printf '%s\n' "$f"
+	exit 0 ;;
+show)
+	d=$(cd "${2:-.}" 2> /dev/null && pwd -P) || { echo "goal-gate: no folder ${2:-.}" >&2; exit 2; }
+	found=$(find_goal "$d") || { echo "goal-gate: no goal for $d" >&2; exit 1; }
+	printf '# goal file: %s\n# runs in: %s\n' "${found%%$'\t'*}" "${found#*$'\t'}"
+	cat -- "${found%%$'\t'*}"
+	exit 0 ;;
+'') ;;
+*)
+	usage >&2
+	exit 2 ;;
+esac
+
+[ -t 0 ] && { usage >&2; exit 2; }
+input=$(cat)
+dir=${CLAUDE_PROJECT_DIR:-}
+[ -n "$dir" ] || dir=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+dir=$(cd "${dir:-.}" 2> /dev/null && pwd -P) || exit 0
+found=$(find_goal "$dir") || exit 0
+goal=${found%%$'\t'*}
+proj=${found#*$'\t'}
+finished "$goal" && exit 0
+
+num() { sed -n "s/^# $1:[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$goal" | tail -n 1; }
+max=$(num max)
+max=${max:-20}
+limit=$(num timeout)
+limit=${limit:-300}
+tries=$(grep -c '^# try:' "$goal")
+now=$(date '+%F %T')
+
+if [ "$tries" -ge "$max" ]; then
+	printf '# gave up: %s after %d tries\n' "$now" "$tries" >> "$goal"
+	echo "goal-gate: the goal was not met after $tries tries, so Claude may stop now. The goal: $goal" >&2
+	exit 1
+fi
+
+out=$(mktemp "${TMPDIR:-/tmp}/goal-gate.XXXXXX") || exit 1
+(cd "$proj" && exec timeout "$limit" bash -e "$goal") > "$out" 2>&1 < /dev/null
+rc=$?
+if [ "$rc" -eq 0 ]; then
+	printf '# met: %s\n' "$now" >> "$goal"
+	exit 0
+fi
+
+tries=$((tries + 1))
+printf '# try: %d %s exit %d\n' "$tries" "$now" "$rc" >> "$goal"
+what=$(awk '/^#!/ { next } /^#[[:space:]]*(max|timeout|try|met|gave up):/ { next }
+	/^#/ { sub(/^#[[:space:]]*/, ""); if ($0 != "") { print; exit } }' "$goal")
+late=
+[ "$rc" -eq 124 ] && late=", timed out after ${limit}s"
+{
+	printf 'Goal not met (try %d of %d, the check exited %d%s): %s\n' "$tries" "$max" "$rc" "$late" \
+		"${what:-see the goal file}"
+	printf 'Last lines of the check (all of it in %s):\n' "$out"
+	tail -n 30 -- "$out"
+	printf 'Goal file: %s, run in %s. Keep working until it passes; never weaken the check (goal-loop).\n' \
+		"$goal" "$proj"
+} >&2
+exit 2

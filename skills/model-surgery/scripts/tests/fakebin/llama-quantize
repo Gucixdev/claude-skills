@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# fake llama-quantize: [--imatrix F] SRC DST TYPE -> DST sized by type; FAILQ makes one type fail
+args=("$@"); [ "$1" = --imatrix ] && args=("${@:3}")
+src=${args[0]} dst=${args[1]} t=${args[2]}
+[ "$t" = "${FAILQ:-none}" ] && { echo "boom" >&2; exit 1; }
+[ "$1" = --imatrix ] && echo "imatrix=$2" > "$dst.imat"
+n=$(printf "%s" "$t" | cksum | cut -d" " -f1); head -c $(( $(stat -c %s "$src") * (30 + n % 60) / 100 )) "$src" > "$dst"

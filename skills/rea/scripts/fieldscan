@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""fieldscan - first look at an unknown binary format from one or more sample files.
+
+usage: fieldscan [-n MAX] FILE...
+
+For every file: size, the first bytes in hex and ASCII, and the places where the size is written into the
+header (u16/u32/u64, little and big endian, as the whole size, size minus the offset, or size minus offset and
+field). For several files of the same size: which byte ranges are constant and which vary, so two samples that
+differ in one setting point straight at that setting. For all: blocks of 256 bytes with entropy above 7.5
+(compressed or encrypted payload), and printable strings of 6+ characters with their offsets.
+Reads files, writes nothing. -n limits the lists (default 25). Exit 0, or 2 on bad usage.
+"""
+import math, struct, sys
+
+
+def usage():
+    sys.stderr.write(__doc__)
+    sys.exit(2)
+
+
+def entropy(b):
+    if not b:
+        return 0.0
+    c = [0] * 256
+    for x in b:
+        c[x] += 1
+    return -sum(n / len(b) * math.log2(n / len(b)) for n in c if n)
+
+
+def strings(d, minlen=6):
+    out, start = [], None
+    for i, x in enumerate(d):
+        if 32 <= x < 127:
+            if start is None:
+                start = i
+        else:
+            if start is not None and i - start >= minlen:
+                out.append((start, d[start:i].decode()))
+            start = None
+    if start is not None and len(d) - start >= minlen:
+        out.append((start, d[start:].decode()))
+    return out
+
+
+def size_fields(d, limit=128):
+    hits = []
+    n = len(d)
+    for size, ch in ((2, "H"), (4, "I"), (8, "Q")):
+        for end, name in (("<", "LE"), (">", "BE")):
+            for off in range(0, min(limit, n - size) + 1):
+                v = struct.unpack_from(end + ch, d, off)[0]
+                for label, want in (("size", n), ("size-offset", n - off), ("size-offset-field", n - off - size)):
+                    if v == want and v > 0:
+                        hits.append("u%d %s at 0x%x = %s" % (size * 8, name, off, label))
+    return hits
+
+
+def ranges(mask):
+    out, start = [], None
+    for i, m in enumerate(mask + [None]):
+        if m and start is None:
+            start = i
+        elif not m and start is not None:
+            out.append((start, i - 1))
+            start = None
+    return out
+
+
+def main(argv):
+    mx = 25
+    if argv and argv[0] == "-n":
+        if len(argv) < 2 or not argv[1].isdigit():
+            usage()
+        mx, argv = int(argv[1]), argv[2:]
+    if not argv or argv[0] in ("-h", "--help"):
+        usage()
+    data = []
+    for p in argv:
+        try:
+            with open(p, "rb") as f:
+                data.append((p, f.read()))
+        except OSError as e:
+            sys.stderr.write("fieldscan: %s\n" % e)
+            return 2
+    for p, d in data:
+        print("== %s: %d bytes" % (p, len(d)))
+        head = d[:16]
+        print("   head  %s  %s" % (head.hex(" "), "".join(chr(x) if 32 <= x < 127 else "." for x in head)))
+        for h in size_fields(d)[:mx]:
+            print("   size  " + h)
+        hot = [i for i in range(0, len(d), 256) if len(d[i:i + 256]) >= 128 and entropy(d[i:i + 256]) > 7.5]
+        if hot:
+            runs = ranges([i in hot for i in range(0, len(d), 256)])
+            print("   entropy>7.5: " + ", ".join("0x%x-0x%x" % (a * 256, (b + 1) * 256) for a, b in runs[:mx]))
+        for off, s in strings(d)[:mx]:
+            print("   str   0x%x %s" % (off, s[:60]))
+    same = [d for _, d in data if len(d) == len(data[0][1])]
+    if len(data) > 1 and len(same) == len(data):
+        n = len(data[0][1])
+        vary = [len({d[i] for d in same}) > 1 for i in range(n)]
+        rs = ranges(vary)
+        print("== %d samples of %d bytes: %d bytes vary in %d ranges" % (len(data), n, sum(vary), len(rs)))
+        for a, b in rs[:mx]:
+            print("   0x%x-0x%x (%d): %s" % (a, b, b - a + 1, " | ".join(d[a:b + 1][:8].hex() for d in same)))
+    elif len(data) > 1:
+        print("== samples differ in size: compare per field, not per byte")
+    return 0
+
+
+sys.exit(main(sys.argv[1:]))

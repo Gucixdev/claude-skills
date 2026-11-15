@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# publish-check - scan a git repo for what must not go public: secrets, the owner's identity, machine-specific
+# paths, and comments that read like generated filler. Reports file:line; changes nothing.
+#
+# usage: publish-check [-H] [REPO]
+#   REPO  the repo to scan (default: the current directory); only tracked files and the working tree's
+#         untracked, not-ignored files are read
+#   -H    also scan the commits not yet pushed (@{u}..HEAD, else all): author and committer e-mails, names
+#         and messages, and the diff text
+# Secret values are masked in the report. What is looked for:
+#   secrets    gitleaks when installed (it knows far more patterns), else token shapes (GitHub, OpenAI, AWS,
+#              Slack, private keys) and name=value lines for password/token/secret/api key
+#   identity   this machine's login name, home directory, and the git name and e-mail from the global and
+#              ~/.gitconfig.local config - read at run time, so the check itself carries no personal detail
+#   paths      home-directory paths that contain a login name, and absolute paths on a mounted data disk in files (use $HOME, ~, $USER or a
+#              path relative to the script)
+#   filler     comment lines with the marks of generated text: emoji, "Let's", "Certainly", "robust",
+#              "seamless", "comprehensive", "leverage", "delve", "It's important to", "Note that", and the
+#              self-justifying phrases ("not theater", "honest gap", "documented, not hidden")
+# Deliberate mentions go on a line containing "publish-check: ok" and are skipped.
+# Exit 0 clean, 1 findings, 2 bad usage.
+
+case ${1:-} in -h | --help) awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;; esac
+
+hist=0 repo=.
+for a in "$@"; do
+	case $a in
+		-H) hist=1 ;;
+		-*) echo "publish-check: unknown option $a (see --help)" >&2; exit 2 ;;
+		*) repo=$a ;;
+	esac
+done
+cd "$repo" 2> /dev/null && git rev-parse --git-dir > /dev/null 2>&1 || { echo "publish-check: not a git repo: $repo" >&2; exit 2; }
+
+tally=$(mktemp) || exit 2
+trap 'rm -f "$tally" "${TMPDIR:-/tmp}/pc.$$"' EXIT
+report() { # report KIND: findings from stdin, one per line, duplicates dropped
+	sort -u | while IFS= read -r l; do
+		case $l in *"publish-check: ok"*) continue ;; esac
+		printf '%-9s %s\n' "$1" "$l"
+		echo x >> "$tally"
+	done
+}
+
+files=$(git ls-files -co --exclude-standard)
+# text files only, minus the lock and vendored noise
+scan() { # scan GREP-ARGS...: matches over the file list as file:line:text
+	[ -n "$files" ] || return 0
+	printf '%s\n' "$files" | while IFS= read -r f; do
+		[ -f "$f" ] || continue
+		case $f in *.lock | *.min.js | *.svg | */vendor/* | */node_modules/*) continue ;; esac
+		grep -In "$@" -- "$f" 2> /dev/null | sed "s|^|$f:|"
+	done
+}
+
+echo "== secrets =="
+{
+	if command -v gitleaks > /dev/null; then
+		gitleaks dir . --no-banner --redact -l warn 2>&1 | grep -E 'File:|Line:|RuleID:' | paste - - -
+	else
+		scan -E 'gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9_-]{30,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+		scan -iE '(passw(or)?d|secret|token|api[_-]?key)[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/+_.-]{8,}' |
+			grep -viE '\$\{?[A-Za-z_(]|<[a-z _-]+>|your[-_ ]|example|changeme|xxxx|\.\.\.|getenv|environ|read -|: *$'
+	fi
+	scan -E '://[^/[:space:]:@]+:[^/[:space:]@]+@[A-Za-z0-9.-]+'
+} | sed -E 's/(ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|sk-|AKIA|xox.-)[A-Za-z0-9_-]+/\1.../g; s#(://[^:/@ ]+:)[^@ ]+@#\1...@#; s/([:=][[:space:]]*["'"'"']?)[A-Za-z0-9\/+_.-]{8,}/\1.../' | report secret
+
+echo "== identity =="
+{
+	id -un
+	basename "$HOME"
+	for c in ~/.gitconfig ~/.gitconfig.local; do
+		[ -f "$c" ] && git config -f "$c" --get-regexp '^user\.(name|email)$' | sed 's/^[^ ]* //'
+	done
+} 2> /dev/null | awk 'length($0) >= 4 && !seen[$0]++' | grep -viE '^(root|user|admin)$|noreply' > "${TMPDIR:-/tmp}/pc.$$"
+if [ -s "${TMPDIR:-/tmp}/pc.$$" ]; then scan -iFf "${TMPDIR:-/tmp}/pc.$$" | report identity; fi
+
+echo "== paths =="
+scan -E '(/home|/Users)/[A-Za-z0-9_][A-Za-z0-9._-]*|/data/dev(/|$)' | grep -vE '/home/(user|username|you|name|\$|\{)|/Users/(user|username|you)' | report path
+
+echo "== filler =="
+{
+	scan -iE '^[[:space:]]*(#|//|/\*|\*|--|;;|"""|<!--)[^"'"'"']*(let'"'"'s |certainly|robust|seamless|comprehensive|leverage|delve|it'"'"'s important to|note that|not theat(er|re)|honest gap|documented,? not hidden|blazing|battle-tested|production-ready|elegant|powerful)'
+	scan -P '^[[:space:]]*(#|//|\*|--|;;)[^\n]*[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}\x{2705}\x{274C}]'
+} | report filler
+
+if [ "$hist" = 1 ]; then
+	echo "== unpushed commits =="
+	range='@{u}..HEAD'
+	git rev-parse '@{u}' > /dev/null 2>&1 || range=HEAD
+	git log --format='%H %ae %ce' "$range" | awk '{ if ($2 !~ /noreply/ || $3 !~ /noreply/) print $1 " author/committer e-mail is not a noreply address: " $2 " " $3 }' | report commit
+	git log --format='%an%n%cn%n%B' "$range" | grep -iF -f "${TMPDIR:-/tmp}/pc.$$" 2> /dev/null | report commit
+fi
+
+found=$(wc -l < "$tally")
+echo
+if [ "$found" -eq 0 ]; then echo "clean"; exit 0; fi
+echo "$found findings"
+exit 1

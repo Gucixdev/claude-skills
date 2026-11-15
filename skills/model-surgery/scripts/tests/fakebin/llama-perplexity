@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# fake llama-perplexity: the perplexity grows as the file shrinks
+f=""; while [ $# -gt 0 ]; do [ "$1" = -m ] && f=$2; shift; done
+s=$(stat -c %s "$f")
+echo "perplexity: calculating"
+awk -v s="$s" 'BEGIN { printf "Final estimate: PPL = %.4f +/- 0.05123\n", 5 + 100000 / s }'

@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""rcon - send commands to a Minecraft (Source RCON protocol) server and print the replies.
+
+usage: rcon [-H HOST] [-p PORT] [-t SECONDS] COMMAND...
+       rcon [-H HOST] [-p PORT] -          (commands from stdin, one per line)
+The password is read from the environment variable RCON_PASSWORD, never from the command line.
+Defaults: host 127.0.0.1, port 25575, timeout 5. Needs enable-rcon=true, rcon.port and rcon.password in server.properties.
+Exit 0 when every command was answered, 1 on a connection, login or protocol error, 2 on bad usage.
+"""
+import os
+import socket
+import struct
+import sys
+
+AUTH, EXEC = 3, 2
+
+
+def send(sock, rid, kind, body):
+    data = struct.pack("<ii", rid, kind) + body.encode() + b"\0\0"
+    sock.sendall(struct.pack("<i", len(data)) + data)
+
+
+def recv_exact(sock, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError("connection closed by the server")
+        buf += chunk
+    return buf
+
+
+def recv(sock):
+    (size,) = struct.unpack("<i", recv_exact(sock, 4))
+    if size < 10 or size > 8192:
+        raise ValueError("bad packet size %d" % size)
+    data = recv_exact(sock, size)
+    rid, kind = struct.unpack("<ii", data[:8])
+    return rid, kind, data[8:-2].decode(errors="replace")
+
+
+def main(argv):
+    host, port, timeout, args = "127.0.0.1", 25575, 5.0, []
+    it = iter(argv)
+    try:
+        for a in it:
+            if a == "-H":
+                host = next(it)
+            elif a == "-p":
+                port = int(next(it))
+            elif a == "-t":
+                timeout = float(next(it))
+            elif a in ("-h", "--help"):
+                print(__doc__.strip())
+                return 0
+            else:
+                args.append(a)
+    except (StopIteration, ValueError):
+        print("rcon: bad option (see --help)", file=sys.stderr)
+        return 2
+    if not args:
+        print("rcon: no command (see --help)", file=sys.stderr)
+        return 2
+    password = os.environ.get("RCON_PASSWORD")
+    if password is None:
+        print("rcon: set RCON_PASSWORD", file=sys.stderr)
+        return 2
+    cmds = [l.rstrip("\n") for l in sys.stdin if l.strip()] if args == ["-"] else [" ".join(args)]
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as s:
+            send(s, 1, AUTH, password)
+            rid, kind, _ = recv(s)
+            if kind == 0:  # some servers send an empty response packet before the login answer
+                rid, kind, _ = recv(s)
+            if rid == -1:
+                print("rcon: login refused (wrong password)", file=sys.stderr)
+                return 1
+            for n, c in enumerate(cmds, start=2):
+                send(s, n, EXEC, c)
+                _, _, reply = recv(s)
+                print(reply)
+    except (OSError, ValueError) as e:
+        print("rcon: %s" % e, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# quant-sweep - quantize one GGUF to several types and measure each: size and perplexity against the source.
+#
+# For every type: llama-quantize (skipped when the file exists, so a rerun resumes), then llama-perplexity on the held-out text.
+# The table is the evidence for choosing a type; it is not the whole check (generations and the task metric: gen-compare, SKILL.md).
+# Perplexity is read from the line `Final estimate: PPL = 7.1234 +/- 0.05` that llama-perplexity prints.
+#
+# usage: quant-sweep -f HELDOUT.txt [options] SOURCE.gguf
+#   -f FILE   held-out text in the model's real domain (not the imatrix calibration text)
+#   -t TYPES  quantization types, space separated (default "Q5_K_M Q4_K_M IQ4_XS Q3_K_M")
+#   -i FILE   imatrix.dat for llama-quantize --imatrix
+#   -o DIR    where the quantized files and sweep.tsv go (default: next to SOURCE)
+#   -n N      -ngl for llama-perplexity (default 0 = CPU; a 4 GB GPU takes small models only)
+#   -S        do not measure the source itself (its perplexity is the baseline; skip only if you already know it)
+#   -x        extra arguments for llama-perplexity, e.g. -x "-c 512 --chunks 20" to bound the time
+# Binaries: $LLAMA_BIN/llama-quantize and llama-perplexity, else from PATH. Exit 0, 1 a step failed, 2 bad usage.
+
+case ${1:-} in -h | --help) awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;; esac
+
+types="Q5_K_M Q4_K_M IQ4_XS Q3_K_M" held="" imat="" out="" ngl=0 skip_src=0 extra=""
+while [ $# -gt 0 ]; do
+	case $1 in
+		-t | -f | -i | -o | -n | -x) [ $# -ge 2 ] || { echo "quant-sweep: $1 needs a value" >&2; exit 2; } ;;
+	esac
+	case $1 in
+		-t) types=$2; shift ;; -f) held=$2; shift ;; -i) imat=$2; shift ;; -o) out=$2; shift ;; -n) ngl=$2; shift ;; -x) extra=$2; shift ;;
+		-S) skip_src=1 ;;
+		--) shift; break ;;
+		-*) echo "quant-sweep: unknown option $1 (see --help)" >&2; exit 2 ;;
+		*) break ;;
+	esac
+	shift
+done
+[ $# -eq 1 ] && [ -f "$1" ] || { echo "quant-sweep: give exactly one existing SOURCE.gguf (see --help)" >&2; exit 2; }
+src=$1
+[ -n "$held" ] && [ -f "$held" ] || { echo "quant-sweep: -f needs an existing held-out text file" >&2; exit 2; }
+[ -z "$imat" ] || [ -f "$imat" ] || { echo "quant-sweep: no such imatrix: $imat" >&2; exit 2; }
+bin() { if [ -n "${LLAMA_BIN:-}" ] && [ -x "$LLAMA_BIN/$1" ]; then echo "$LLAMA_BIN/$1"; else command -v "$1"; fi; }
+quant=$(bin llama-quantize) ppl=$(bin llama-perplexity)
+[ -n "$quant" ] && [ -n "$ppl" ] || { echo "quant-sweep: llama-quantize / llama-perplexity not found (build llama.cpp, see references/quant.md, or set LLAMA_BIN)" >&2; exit 2; }
+out=${out:-$(dirname "$src")}
+mkdir -p "$out" || exit 2
+base=$(basename "$src" .gguf)
+
+measure() { # FILE -> prints the perplexity or "FAIL"
+	local log v
+	log=$("$ppl" -m "$1" -f "$held" -ngl "$ngl" $extra 2>&1) || { echo FAIL; return 1; }
+	v=$(printf '%s\n' "$log" | sed -n 's/.*Final estimate: PPL = \([0-9.]*\).*/\1/p' | tail -1)
+	[ -n "$v" ] && echo "$v" || { echo FAIL; return 1; }
+}
+
+rc=0 tsv="$out/sweep.tsv"
+printf 'type\tsize_mb\tppl\tdelta_pct\n' > "$tsv"
+mb() { awk -v b="$(stat -c %s -- "$1")" 'BEGIN { printf "%.1f", b / 1048576 }'; }
+base_ppl=""
+if [ "$skip_src" = 0 ]; then
+	echo "measuring the source ($(basename "$src")) ..." >&2
+	base_ppl=$(measure "$src") || rc=1
+	[ "$base_ppl" = FAIL ] && base_ppl=""
+	printf 'source\t%s\t%s\t0\n' "$(mb "$src")" "${base_ppl:-FAIL}" >> "$tsv"
+fi
+for t in $types; do
+	f="$out/$base-$t.gguf"
+	if [ ! -s "$f" ]; then
+		echo "quantizing $t ..." >&2
+		if [ -n "$imat" ]; then "$quant" --imatrix "$imat" "$src" "$f" "$t" > "$out/$base-$t.quant.log" 2>&1; else "$quant" "$src" "$f" "$t" > "$out/$base-$t.quant.log" 2>&1; fi || {
+			echo "quant-sweep: llama-quantize failed for $t, see $out/$base-$t.quant.log" >&2; mv -f -- "$f" "$f.failed" 2> /dev/null; printf '%s\t-\tFAIL\t-\n' "$t" >> "$tsv"; rc=1; continue; }
+	fi
+	echo "measuring $t ..." >&2
+	p=$(measure "$f") || rc=1
+	d="-"
+	[ "$p" != FAIL ] && [ -n "$base_ppl" ] && d=$(awk -v a="$p" -v b="$base_ppl" 'BEGIN { printf "%+.2f", 100 * (a - b) / b }')
+	printf '%s\t%s\t%s\t%s\n' "$t" "$(mb "$f")" "$p" "$d" >> "$tsv"
+done
+column -t -s "$(printf '\t')" "$tsv"
+echo "table: $tsv   (lower ppl is better; judge by the task metric too)"
+exit $rc

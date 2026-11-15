@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# safetensors-header - list the tensors of a .safetensors file from its header alone (no weights are read).
+#
+# The format is: 8 bytes little-endian = header length N, then N bytes of JSON {name: {dtype, shape, data_offsets}}.
+# So a 14 GB shard is inspected in milliseconds, and a truncated download is caught before anything loads it.
+#
+# usage: safetensors-header [-s] [-g REGEX] FILE...
+#   -s        summary only: tensor count, parameters, dtype histogram, the 5 biggest tensors
+#   -g REGEX  only tensors whose name matches (extended regex)
+# Output (without -s): name<TAB>dtype<TAB>shape<TAB>params. Problems go to stderr:
+#   file shorter than header + data (truncated), data offsets that overlap or leave holes, a header over 100 MB.
+# Exit 0 clean, 1 a file has a problem, 2 bad usage. Needs jq.
+
+case ${1:-} in -h | --help) awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;; esac
+command -v jq > /dev/null || { echo "safetensors-header: jq not installed" >&2; exit 2; }
+
+summary=0 grep_re=""
+while [ $# -gt 0 ]; do
+	case $1 in
+		-s) summary=1 ;;
+		-g) [ $# -ge 2 ] || { echo "safetensors-header: -g needs a regex" >&2; exit 2; }; grep_re=$2; shift ;;
+		--) shift; break ;;
+		-*) echo "safetensors-header: unknown option $1 (see --help)" >&2; exit 2 ;;
+		*) break ;;
+	esac
+	shift
+done
+[ $# -ge 1 ] || { echo "safetensors-header: give a file (see --help)" >&2; exit 2; }
+
+rc=0
+for f in "$@"; do
+	[ -f "$f" ] || { echo "$f: no such file" >&2; rc=1; continue; }
+	size=$(stat -c %s -- "$f")
+	[ "$size" -ge 8 ] || { echo "$f: shorter than 8 bytes" >&2; rc=1; continue; }
+	n=$(od -An -t u8 -N 8 -- "$f" | tr -d ' ')
+	if [ "$n" -gt 104857600 ] || [ $((8 + n)) -gt "$size" ]; then
+		echo "$f: header length $n does not fit the file ($size bytes): not safetensors or truncated" >&2; rc=1; continue
+	fi
+	hdr=$(dd if="$f" bs=1 skip=8 count="$n" 2> /dev/null | tr -d '\0')
+	if ! printf '%s' "$hdr" | jq -e 'type == "object"' > /dev/null 2>&1; then
+		echo "$f: header is not JSON" >&2; rc=1; continue
+	fi
+	# one row per tensor: name dtype shape params begin end
+	rows=$(printf '%s' "$hdr" | jq -r 'del(.__metadata__) | to_entries[] | [.key, .value.dtype, (.value.shape | map(tostring) | join("x")), (.value.shape | reduce .[] as $d (1; . * $d)), .value.data_offsets[0], .value.data_offsets[1]] | @tsv')
+	# layout check: sorted by offset, tensors must tile [0, size - 8 - n) exactly
+	data=$((size - 8 - n))
+	bad=$(printf '%s\n' "$rows" | awk -F'\t' -v data="$data" 'NF { print $5 "\t" $6 "\t" $1 }' | sort -n | awk -F'\t' -v data="$data" '
+		BEGIN { pos = 0 }
+		{ if ($1 != pos) printf "gap or overlap before %s (expected offset %d, got %d)\n", $3, pos, $1; pos = $2 }
+		END { if (pos != data) printf "tensors end at %d but the file holds %d data bytes%s\n", pos, data, (pos > data ? " (truncated)" : " (trailing bytes)") }')
+	if [ -n "$bad" ]; then printf '%s\n' "$bad" | sed "s#^#$f: #" >&2; rc=1; fi
+	[ -n "$grep_re" ] && rows=$(printf '%s\n' "$rows" | awk -F'\t' -v re="$grep_re" '$1 ~ re')
+	if [ "$summary" = 1 ]; then
+		printf '%s\n' "$rows" | awk -F'\t' -v f="$f" '
+			NF { n++; p += $4; d[$2] += $4; if ($4 > 0) { big[$1] = $4 } }
+			END {
+				printf "%s: %d tensors, %.3f B parameters\n", f, n, p / 1e9
+				for (k in d) printf "  dtype %-6s %6.2f%% of parameters\n", k, 100 * d[k] / (p ? p : 1)
+				printf "  biggest:\n"
+				for (k in big) printf "    %12d  %s\n", big[k], k | "sort -rn | head -5"
+			}'
+	else
+		[ $# -gt 1 ] && echo "# $f"
+		printf '%s\n' "$rows" | cut -f1-4
+	fi
+done
+exit $rc

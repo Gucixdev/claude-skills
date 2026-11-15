@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# har-endpoints - the API a web app talks to, from a HAR export: one line per endpoint with method, status,
+# content type, how often it was called, and the query parameter names (values dropped, so tokens stay out).
+#
+# usage: har-endpoints [-a] FILE.har     -a: keep static files (images, css, fonts, js); default drops them
+# Make the HAR in the browser devtools: Network tab, do the action once, "Save all as HAR". Sort order: most
+# called first. A request body is shown as its JSON keys when it is JSON. Reads only. Needs jq.
+# Exit 0, 2 on bad usage.
+
+case ${1:-} in -h | --help | '') awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; [ -n "${1:-}" ]; exit $(($? == 0 ? 0 : 2)) ;; esac
+
+all=0
+[ "$1" = -a ] && { all=1; shift; }
+har=${1:-}
+[ -r "$har" ] || { echo "har-endpoints: cannot read ${har:-a file}" >&2; exit 2; }
+command -v jq > /dev/null || { echo "har-endpoints: jq not installed" >&2; exit 2; }
+
+jq -r --argjson all "$all" '
+	.log.entries[]
+	| . as $e
+	| ($e.request.url | sub("#.*$"; "")) as $u
+	| ($u | split("?")) as $p
+	| ($e.response.content.mimeType // "" | split(";")[0] // "") as $mime
+	| select($all == 1 or ($mime | test("^(image|font|text/css)|javascript") | not))
+	| ($e.request.postData.text // "" | (try (fromjson | if type == "object" then keys | join(",") else type end) catch "")) as $body
+	| [ $e.request.method, ($e.response.status | tostring), $mime, $p[0],
+	    (if ($p | length) > 1 then ($p[1] | split("&") | map(split("=")[0]) | join(",")) else "" end), $body ]
+	| @tsv' "$har" |
+	sort | uniq -c | sort -rn |
+	awk -F'\t' -v OFS='\t' 'BEGIN { print "count", "method", "status", "mime", "url", "query keys", "body keys" }
+		{ s = $1; sub(/^ */, "", s); c = s; sub(/ .*/, "", c); sub(/^[0-9]+ /, "", s); $1 = s; print c, $0 }'

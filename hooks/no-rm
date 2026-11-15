@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# no-rm - Claude Code PreToolUse hook for Bash: refuses commands that delete files - rm, rmdir, unlink, shred,
+# find -delete or -exec rm, git clean, git rm without --cached, also behind sudo, xargs, env, bash -c or eval -
+# unless every path they name is under /tmp or $TMPDIR. Exit 2 blocks the call and hands the reason to Claude, which
+# then moves things to the trash instead. Heredoc bodies are not commands and are skipped.
+input=$(cat)
+if ! command -v python3 > /dev/null; then
+	# shortcut: without python3 only a plain regex check; install python3 for the real parser
+	cmd=$(printf '%s' "$input" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\(.*\)".*/\1/p')
+	if printf '%s' "$cmd" | grep -qE '(^|[;&|(`]|sudo|xargs)[[:space:]]*(rm|rmdir|unlink|shred)[[:space:]]|-delete|git[[:space:]]+clean'; then
+		echo "Deleting is off here (trash-not-rm): move it to the trash instead - trash PATH (or gio trash PATH); in a repo git mv PATH trash/PATH." >&2
+		exit 2
+	fi
+	exit 0
+fi
+printf '%s' "$input" | python3 -I -c '
+import json, os, re, shlex, sys
+
+DELETERS = {"rm", "rmdir", "unlink", "shred", "srm", "wipe"}
+# wrapper -> its options that take a separate argument; timeout also takes the duration before the command
+WRAPPERS = {"sudo": "-u -g -C -D -h -p -r -t -U -T", "doas": "-u -C", "command": "", "builtin": "", "exec": "-a",
+            "nohup": "", "time": "-f -o", "nice": "-n", "ionice": "-c -n -p", "env": "-u -C -S", "chronic": "",
+            "xargs": "-a -d -E -I -L -n -P -s", "busybox": "", "stdbuf": "-i -o -e", "timeout": "-k -s", "unbuffer": ""}
+WRAPPERS = {k: set(v.split()) for k, v in WRAPPERS.items()}
+SHELLS = {"sh", "bash", "dash", "zsh", "ksh", "fish"}
+tmp = ["/tmp/"] + ([os.environ["TMPDIR"].rstrip("/") + "/"] if os.environ.get("TMPDIR") else [])
+
+def strip_heredocs(text):
+    out, end = [], None
+    for line in text.split("\n"):
+        if end is not None:
+            if line.strip() == end:
+                end = None
+            continue
+        out.append(line)
+        m = re.search(r"<<-?\s*([\x27\"]?)([A-Za-z_][A-Za-z0-9_]*)\1", line)
+        if m:
+            end = m.group(2)
+    return "\n".join(out)
+
+def segments(text):
+    text = strip_heredocs(text).replace("`", " ; ").replace("\n", " ; ").replace("$(", " ; ( ")
+    lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()<>")
+    lex.whitespace_split = True
+    seg = []
+    try:
+        for tok in lex:
+            if tok and set(tok) <= set(";&|()"):
+                if seg:
+                    yield seg
+                seg = []
+            else:
+                seg.append(tok)
+    except ValueError:  # unbalanced quotes: judge what was read
+        pass
+    if seg:
+        yield seg
+
+def under_tmp(p):
+    p = os.path.realpath(os.path.expanduser(p))
+    return any((p + "/").startswith(t) and p + "/" != t for t in tmp)
+
+def blocked(words, depth=0):
+    i = 0
+    while i < len(words) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[i]):
+        i += 1
+    while i < len(words) and os.path.basename(words[i]) in WRAPPERS:
+        takes = WRAPPERS[os.path.basename(words[i])]
+        wrapper = os.path.basename(words[i])
+        i += 1
+        while i < len(words) and (words[i].startswith("-") or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[i])):
+            i += 2 if words[i] in takes else 1
+        if wrapper == "timeout" and i < len(words):
+            i += 1
+    if i >= len(words):
+        return None
+    name, args = os.path.basename(words[i]), words[i + 1:]
+    if name in SHELLS and "-c" in args and depth < 3:
+        j = args.index("-c")
+        if j + 1 < len(args):
+            return check(args[j + 1], depth + 1)
+    if name == "eval" and depth < 3:
+        return check(" ".join(args), depth + 1)
+    if name in DELETERS:
+        paths = [a for a in args if not a.startswith("-")]
+        if paths and all(under_tmp(p) for p in paths):
+            return None
+        return name
+    if name == "find":
+        if "-delete" in args:
+            return "find -delete"
+        for k, a in enumerate(args):
+            if a in ("-exec", "-execdir", "-ok", "-okdir") and k + 1 < len(args) and os.path.basename(args[k + 1]) in DELETERS:
+                return "find -exec " + args[k + 1]
+    if name == "git":
+        sub = [a for a in args if not a.startswith("-")][:1]
+        if sub == ["clean"]:
+            return "git clean"
+        if sub == ["rm"] and "--cached" not in args:
+            return "git rm"
+    return None
+
+def check(text, depth=0):
+    for seg in segments(text):
+        hit = blocked(seg, depth)
+        if hit:
+            return hit
+    return None
+
+try:
+    command = (json.load(sys.stdin).get("tool_input") or {}).get("command") or ""
+except ValueError:
+    sys.exit(0)
+hit = check(command)
+if hit:
+    sys.stderr.write(
+        "Deleting is off here (trash-not-rm): `%s` was not run. Move it to the trash instead - `trash PATH` "
+        "(or `gio trash PATH`); in a repo `git mv PATH trash/PATH`. Temp files under /tmp may be removed.\n" % hit)
+    sys.exit(2)
+'

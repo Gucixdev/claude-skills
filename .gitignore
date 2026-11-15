@@ -1,0 +1,11 @@
+# local state and editor leftovers
+*.swp
+*~
+.DS_Store
+.env
+.env.*
+!.env.example
+# model-surgery scratch output
+sweep.tsv
+*.gguf
+*.safetensors

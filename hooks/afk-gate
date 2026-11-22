@@ -15,7 +15,9 @@
 # AFK_GATE_POLL=5 s; the hook timeout in settings.json must be longer than IDLE) for a message from him. One
 # arrives: exit 0, he is here. None: the stop is blocked. His silence is counted from the moment Claude stopped, never
 # from his last message, so time Claude spent working does not count as him being away. Once blocked and he still
-# has not written since, later stops are blocked at once (state file blocked_at). A stop that is blocked is counted and exit 2 sends
+# has not written since, later stops are blocked at once (state file blocked_at.SESSION).
+# Several sessions at once: his silence is the newest human message of ANY session (AFK_GATE_PROJECTS), and while another
+# session wrote something in the last AFK_GATE_BUSY=90 s (it is working, or he is typing there) nobody is idle: exit 0. A stop that is blocked is counted and exit 2 sends
 # Claude back to work with the first open item of todo.md. The cap (default 300 blocked stops, AFK_GATE_MAX) is the
 # brake against a loop that makes no progress; at the cap the mode switches itself off and the reason is shown to him.
 # An item is open unless the line holds "zrobione", "done" or "blocked". No transcript, no timestamp: no block.
@@ -47,11 +49,35 @@ left() {	# seconds until the forced mode ends, 0 when off or expired
 	[ "$u" -gt "$now" ] 2> /dev/null && echo $((u - now)) || echo 0
 }
 
-last_human() {	# last_human TRANSCRIPT -> epoch milliseconds of his newest message, empty when unknown
-	local ts
+projects=${AFK_GATE_PROJECTS:-$HOME/.claude/projects}
+busy=${AFK_GATE_BUSY:-90}
+
+transcripts() {	# transcripts() TRANSCRIPT -> every session transcript touched in the last day, plus his own
+	{ printf '%s\n' "$1"; find "$projects" -maxdepth 2 -name '*.jsonl' -mtime -1 2> /dev/null; } | sort -u
+}
+
+last_human() {	# last_human TRANSCRIPT -> epoch ms of his newest message in ANY session, empty when unknown
+	local f ts best=""
 	[ -r "${1:-}" ] || return 1
-	ts=$(tail -c 4000000 "$1" | jq -R -r 'fromjson? | select(.type == "user" and .origin.kind == "human") | .timestamp' 2> /dev/null | tail -n 1)
-	[ -n "$ts" ] && date -d "$ts" +%s%3N 2> /dev/null
+	while IFS= read -r f; do
+		[ -r "$f" ] || continue
+		ts=$(tail -c 4000000 "$f" | jq -R -r 'fromjson? | select(.type == "user" and .origin.kind == "human") | .timestamp' 2> /dev/null | tail -n 1)
+		[ -n "$ts" ] || continue
+		ts=$(date -d "$ts" +%s%3N 2> /dev/null) || continue
+		[ -z "$best" ] || [ "$ts" -gt "$best" ] && best=$ts
+	done < <(transcripts "$1")
+	[ -n "$best" ] && echo "$best"
+}
+
+other_busy() {	# other_busy TRANSCRIPT: another session wrote something in the last $busy seconds (it is working, or he is there)
+	local f now m
+	now=$(date +%s)
+	while IFS= read -r f; do
+		[ "$f" = "$1" ] && continue
+		m=$(stat -c %Y "$f" 2> /dev/null) || continue
+		[ $((now - m)) -lt "$busy" ] && return 0
+	done < <(transcripts "$1")
+	return 1
 }
 
 case ${1:-} in
@@ -61,7 +87,7 @@ auto)
 	mkdir -p "$dir" || exit 2
 	echo "$s" > "$dir/idle"
 	echo 0 > "$dir/count"
-	rm -f -- "$dir/blocked_at"
+	rm -f -- "$dir"/blocked_at.*
 	echo "afk-gate: auto, after $((s / 60)) min ($s s) of silence from you Claude cannot stop while todo.md has open lines ($todo)"
 	exit 0 ;;
 on)
@@ -72,7 +98,7 @@ on)
 	echo "afk-gate: forced for $((s / 60)) minutes; Claude cannot stop while todo.md has open lines ($todo)"
 	exit 0 ;;
 off)
-	rm -f -- "$dir/until" "$dir/idle" "$dir/blocked_at" 2> /dev/null
+	rm -f -- "$dir/until" "$dir/idle" "$dir"/blocked_at.* 2> /dev/null
 	echo "afk-gate: off"
 	exit 0 ;;
 status)
@@ -108,7 +134,9 @@ if [ "$l" -le 0 ]; then	# auto: act only when neither of us has done anything fo
 	seen=$(last_human "$tp") || exit 0
 	# The clock starts when I stopped (now), not at his last message: my own working time is not his silence.
 	# Already blocked since he last wrote: he is still gone, no second wait.
-	lastblock=$(cat "$dir/blocked_at" 2> /dev/null || echo 0)
+	sid=$(printf '%s' "$input" | jq -r '.session_id // "x"' 2> /dev/null | tr -c 'A-Za-z0-9_-' '_')
+	lastblock=$(cat "$dir/blocked_at.$sid" 2> /dev/null || echo 0)
+	other_busy "$tp" && exit 0
 	start=$(date +%s)
 	if [ "$seen" -gt "$lastblock" ]; then
 		wait=${AFK_GATE_WAIT:-1700} poll=${AFK_GATE_POLL:-5}
@@ -116,12 +144,13 @@ if [ "$l" -le 0 ]; then	# auto: act only when neither of us has done anything fo
 		while [ $(($(date +%s) - start)) -lt "$idle" ]; do
 			sleep "$poll"
 			now=$(last_human "$tp") || exit 0
-			[ "$now" -gt "$seen" ] && exit 0	# he wrote: he is here
+			[ "$now" -gt "$seen" ] && exit 0	# he wrote (in any session): he is here
+			other_busy "$tp" && exit 0	# another session is working: not both idle
 		done
 	fi
 	why="auto, nobody did anything for $((idle / 60)) min"
 fi
-date +%s%3N > "$dir/blocked_at"
+[ -n "${sid:-}" ] && date +%s%3N > "$dir/blocked_at.$sid"
 echo $((n + 1)) > "$dir/count"
 {
 	printf 'AFK mode is on (%s). Blocked stops so far: %d (safety brake at %d). He is away and wants work to continue: do real work, do not stop, do not ask, and do not repeat that you are blocked or out of limit.\n' \

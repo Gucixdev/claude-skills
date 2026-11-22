@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# bin/skills-factory, and its two ends in hooks/end-session-gate (SessionEnd queues) and hooks/session-start (says
+# bin/skills-factory, and its two ends in hooks/session-end (SessionEnd queues) and hooks/session-start (says
 # how many wait), on a hand-made transcript.
 
 setup() {
@@ -53,11 +53,11 @@ setup() {
 }
 
 @test "SessionEnd queues the session; the next session-start says it waits" {
-	printf '{"hook_event_name":"SessionEnd","session_id":"s3","transcript_path":"%s","cwd":"/x"}' "$T/tr.jsonl" | "$H/end-session-gate"
+	printf '{"hook_event_name":"SessionEnd","session_id":"s3","transcript_path":"%s","cwd":"/x"}' "$T/tr.jsonl" | "$H/session-end"
 	[ -f "$SESSION_GATE_DIR/factory/s3.md" ]
 	run "$H/session-start" < <(echo '{"hook_event_name":"SessionStart","session_id":"s4"}')
 	[[ $output == *"Skill factory: 1 finished sessions wait to become skills"* ]]
-	SKILLS_FACTORY=off run "$H/end-session-gate" < <(printf '{"hook_event_name":"SessionEnd","session_id":"s5","transcript_path":"%s"}' "$T/tr.jsonl")
+	SKILLS_FACTORY=off run "$H/session-end" < <(printf '{"hook_event_name":"SessionEnd","session_id":"s5","transcript_path":"%s"}' "$T/tr.jsonl")
 	[ ! -f "$SESSION_GATE_DIR/factory/s5.md" ]
 }
 

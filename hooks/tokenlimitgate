@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# tokenlimitgate - Claude Code Stop hook: when the usage limit is hit, the Stop gates stand down. A gate that blocks
+# while the limit is spent only makes Claude fail the same turn again and again (it cost him a fifth of a window once:
+# say it once). This hook looks at the end of the turn for the limit text; the first time it sets the mark
+# ($SESSION_GATE_DIR/limit.SESSION) and prints one line; the other gates (sg_limited in smartgates) then let the turn
+# end; the mark counts for five hours, then the window has reset.
+#
+# The limit text is not checked against a real run: "usage limit reached", "hit your limit", "limit reached",
+# "resets at/in", "rate limit" (case ignored) in the reply or in the event's "last_assistant_message"; change
+# TOKENLIMIT_RE if Claude Code words it differently. TOKENLIMIT_GATE=off disables it. Needs jq.
+# Enable (you, in settings.json): hooks.Stop, FIRST in the list (before the gates that block), command
+# ~/.claude/hooks/tokenlimitgate.
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${TOKENLIMIT_GATE:-on}" = off ] && exit 0
+re=${TOKENLIMIT_RE:-(usage|rate|session|weekly) limit (reached|hit|exceeded)|hit your (usage )?limit|limit reached|resets? (at|in) [0-9]}
+msg=$(printf '%s' "$input" | jq -r '.last_assistant_message // empty' 2> /dev/null)
+[ -n "$msg" ] || msg=$(sg_turn | awk -F'\t' '$1 == "A" { t = $2 } END { print t }')
+printf '%s' "$msg" | grep -qiE -- "$re" || exit 0
+mark=$sg_state/limit.$sid
+if [ -z "$(find "$mark" -mmin -300 2> /dev/null)" ]; then
+	: > "$mark"
+	echo "tokenlimitgate: the usage limit is hit - the gates stand down for this session until it resets; nothing more will be retried." >&2
+fi
+exit 0

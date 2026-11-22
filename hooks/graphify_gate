@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# graphify_gate - Claude Code PreToolUse hook for Grep|Glob: where he keeps a graphify graph of a repo, a lookup starts
+# with the graph (mcp__graphify__query_graph, get_node, get_neighbors, shortest_path), and the graph keeps growing from
+# the lookups. The first Grep or Glob in such a repo in a session is refused once with that pointer; the next one goes
+# through. A repo has a graph when ${GRAPHIFY_HOME:-~/.local/share/graphify}/REPONAME/graph.json exists, REPONAME the
+# name of the repo's top folder, and the graph is not older than GRAPHIFY_STALE_DAYS (default 30): a stale graph
+# would answer wrongly, so it is not suggested.
+#
+# GRAPHIFY_GATE=off disables it. Needs jq and git; without them the hook does nothing.
+# Enable (you, in settings.json): hooks.PreToolUse, matcher "Grep|Glob".
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${GRAPHIFY_GATE:-on}" = off ] && exit 0
+dir=$(printf '%s' "$input" | jq -r '.tool_input.path // empty')
+[ -d "$dir" ] || dir=$cwd
+root=$(git -C "$dir" rev-parse --show-toplevel 2> /dev/null) || exit 0
+g=${GRAPHIFY_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/graphify}/$(basename -- "$root")/graph.json
+[ -f "$g" ] || exit 0
+[ -z "$(find "$g" -mtime +"${GRAPHIFY_STALE_DAYS:-30}" 2> /dev/null)" ] || exit 0
+sg_once "graph:$root" || exit 0
+sg_block "graphify_gate: $(basename -- "$root") has a graph. Ask it first - mcp__graphify__query_graph (or get_node, get_neighbors, shortest_path); search the files only for what the graph does not answer, and when you find something it lacked, say so. The next Grep goes through."

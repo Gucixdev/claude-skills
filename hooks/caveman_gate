@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# caveman_gate - Claude Code Stop hook: his rule is short answers without ceremony (code (caveman)): answer first, no
+# opener ("Sure!", "Let me", "Great question", "Jasne", "Oczywiście"), no closer ("Hope this helps", "Let me know
+# if", "Daj znać"). A final reply that opens or closes that way is handed back once for a shorter rewrite; the rewrite
+# is not checked again, so it is a nudge, not a loop.
+#
+# The reply is the "last_assistant_message" of the event when Claude Code sends it, else the last text of the
+# transcript. CAVEMAN_GATE=off disables it. Needs jq; without it the hook does nothing.
+# Enable (you, in settings.json): hooks.Stop, command ~/.claude/hooks/caveman_gate.
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${CAVEMAN_GATE:-on}" = off ] && exit 0
+sg_limited && exit 0
+turn=$(sg_turn)
+msg=$(printf '%s' "$input" | jq -r '.last_assistant_message // empty' 2> /dev/null)
+[ -n "$msg" ] || msg=$(printf '%s\n' "$turn" | awk -F'\t' '$1 == "A" { t = $2 } END { print t }')
+[ -n "$msg" ] || exit 0
+low=$(printf '%s' "$msg" | tr '\n' ' ' | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]*_#>-]*//')
+head=$(printf '%s' "$low" | cut -c1-60)
+tail=$(printf '%s' "$low" | rev | cut -c1-160 | rev)
+hit=''
+printf '%s' "$head" | grep -qE '^(sure|great( question)?|certainly|of course|absolutely|okay|alright|happy to|i.ll now|i will now|let me|jasne|oczywi|świetnie|swietnie|rozumiem|dzięki|dzieki)([^[:alpha:]]|$)' && hit='an opener'
+printf '%s' "$tail" | grep -qE 'hope this helps|let me know if|feel free to|happy to help|daj zna[cć]|mam nadziej' && hit="${hit:+$hit and }a closer"
+[ -n "$hit" ] || exit 0
+ln=$(printf '%s\n' "$turn" | awk -F'\t' '$1 == "U" { n = $2 } END { print n }')
+sg_once "caveman:${ln:-0}" || exit 0
+sg_block "caveman_gate: the reply has $hit. Say it again without: the answer first, no greeting, no closing offer, same facts."

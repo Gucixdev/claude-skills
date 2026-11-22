@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# mybashtoolgate - Claude Code PreToolUse hook for Bash: a repeated action becomes a script at once, not another
+# terminal one-off (automate-everything). A long or piped command (80+ characters, or two or more of | && ; ||) that
+# this session already ran twice - numbers and spacing ignored - is refused once: write it as one bash file of his kind
+# (header as help, no arguments, prints the answer) and run that. Short commands, scripts called by path and the
+# usual git reads are repeated freely; a test or build line is a script already in spirit, so it is left alone
+# too (bats, make, cargo, go, npm, pytest).
+#
+# MYBASH_REPEAT changes the count (default 3 runs: the two before and this one). MYBASH_GATE=off disables it. The
+# count comes from the transcript, so the current call may or may not be in it yet: it fires on the third or fourth
+# run. Needs jq; without it the hook does nothing.
+# Enable (you, in settings.json): hooks.PreToolUse, matcher "Bash".
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${MYBASH_GATE:-on}" = off ] && exit 0
+[ -f "$tr_path" ] || exit 0
+cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
+[ -n "$cmd" ] || exit 0
+id=$(printf '%s' "$input" | jq -r '.tool_use_id // empty')
+ops=$(printf '%s' "$cmd" | grep -oE '\|\||&&|\||;' | wc -l)
+[ "${#cmd}" -ge 80 ] || [ "$ops" -ge 2 ] || exit 0
+case $cmd in ./* | /* | '~'/* | bats* | make* | cargo* | go\ * | npm* | pytest* | git\ status* | git\ log* | git\ diff*) exit 0 ;; esac
+norm='gsub("[0-9]+"; "N") | gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "")'
+want=$(printf '%s' "$cmd" | jq -Rs -r "$norm")
+n=$(jq -R -r --arg id "$id" 'fromjson? // empty | select(.type == "assistant") | .message.content[]?
+	| select(.type == "tool_use" and .name == "Bash" and .id != $id) | .input.command // empty
+	| '"$norm" "$tr_path" 2> /dev/null | grep -cxF -- "$want")
+[ "$n" -ge $((${MYBASH_REPEAT:-3} - 1)) ] || exit 0
+sg_once "mybash:$want" || exit 0
+sg_block "mybashtoolgate: this command ran $n times already in this session. A repeated action becomes a script: write it as one bash file (header as help, no arguments, prints the answer), put it where the tools live, and run that. Repeat the command to run it as it is."

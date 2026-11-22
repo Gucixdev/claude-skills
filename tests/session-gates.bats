@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# hooks/session-start, hooks/end-session-gate, hooks/memorize-gate, on throwaway repos and hand-made transcripts.
+# hooks/session-start, hooks/session-end, hooks/memorize-gate, on throwaway repos and hand-made transcripts.
 
 setup() {
 	H=$BATS_TEST_DIRNAME/../hooks
@@ -37,32 +37,32 @@ tool() { jq -cn --arg n "$1" --arg f "$2" '{type:"assistant",message:{content:[{
 	[[ $output != *"ODPOWIEDZ"* ]]
 }
 
-@test "end-session-gate Stop: an edited file left uncommitted is handed back once" {
+@test "session-end Stop: an edited file left uncommitted is handed back once" {
 	"$H/session-start" < <(ev SessionStart) > /dev/null
 	echo change > "$R/a"; tool Edit "$R/a"
-	run "$H/end-session-gate" < <(ev Stop)
+	run "$H/session-end" < <(ev Stop)
 	[ "$status" -eq 2 ] && [[ $output == *"$R/a"* ]]
-	run "$H/end-session-gate" < <(ev Stop)
+	run "$H/session-end" < <(ev Stop)
 	[ "$status" -eq 0 ]
 	git -C "$R" commit -qam "fix: a"
 	echo again > "$R/a"; git -C "$R" commit -qam "fix: a again"
-	run "$H/end-session-gate" < <(ev Stop)
+	run "$H/session-end" < <(ev Stop)
 	[ "$status" -eq 0 ] && [ -z "$output" ]
 }
 
-@test "end-session-gate Stop: his files from before the session, files outside git and in /tmp are not listed" {
+@test "session-end Stop: his files from before the session, files outside git and in /tmp are not listed" {
 	echo his > "$R/mine"
 	"$H/session-start" < <(ev SessionStart) > /dev/null
 	echo more > "$R/mine"; tool Edit "$R/mine"
 	echo y > "$T/loose"; tool Write "$T/loose"
 	echo z > "$TMPDIR/scratch"; tool Write "$TMPDIR/scratch"
-	run "$H/end-session-gate" < <(ev Stop)
+	run "$H/session-end" < <(ev Stop)
 	[ "$status" -eq 0 ] && [ -z "$output" ]
-	END_GATE=off run "$H/end-session-gate" < <(ev Stop)
+	END_GATE=off run "$H/session-end" < <(ev Stop)
 	[ "$status" -eq 0 ]
 }
 
-@test "end-session-gate SessionEnd: a journal line with the session's commits, claude-config pushed when clean and ahead" {
+@test "session-end SessionEnd: a journal line with the session's commits, claude-config pushed when clean and ahead" {
 	git init -q --bare "$T/remote.git"
 	git clone -q "$T/remote.git" "$T/cfgrepo" 2> /dev/null
 	cp -r "$T/cfg/." "$T/cfgrepo/" && git -C "$T/cfgrepo" add . && git -C "$T/cfgrepo" commit -qm init && git -C "$T/cfgrepo" push -q origin HEAD 2> /dev/null
@@ -70,12 +70,12 @@ tool() { jq -cn --arg n "$1" --arg f "$2" '{type:"assistant",message:{content:[{
 	mkdir -p "$SESSION_GATE_DIR" && echo 1 > "$SESSION_GATE_DIR/start.s1"	# the session began in 1970: every commit is in it
 	echo c > "$R/a"; git -C "$R" commit -qam "feat: the work"; tool Edit "$R/a"
 	echo n > "$T/cfgrepo/new"; git -C "$T/cfgrepo" add new; git -C "$T/cfgrepo" commit -qm "docs: new"
-	run "$H/end-session-gate" < <(ev SessionEnd)
+	run "$H/session-end" < <(ev SessionEnd)
 	[ "$status" -eq 0 ]
 	grep -q "1 files edited; commits: proj .* feat: the work" "$SESSION_GATE_DIR/journal.md"
 	[ "$(git -C "$T/remote.git" log -1 --format=%s)" = "docs: new" ]
 	echo dirty > "$T/cfgrepo/new"; git -C "$T/cfgrepo" commit -qam "docs: two" && echo d > "$T/cfgrepo/x"
-	run "$H/end-session-gate" < <(ev SessionEnd)
+	run "$H/session-end" < <(ev SessionEnd)
 	[ "$(git -C "$T/remote.git" log -1 --format=%s)" = "docs: new" ]
 }
 

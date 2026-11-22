@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# ponytail_gate - Claude Code PreToolUse hook for Write|Edit|MultiEdit: the two parts of the ponytail ladder that a
+# hook can see (code (ponytail)): a dependency is not added for a few lines, and an abstraction is not made nobody
+# asked for. Refused once per file and session:
+#   - a manifest (package.json, Cargo.toml, go.mod, pyproject.toml, requirements*.txt, Gemfile) gets a new
+#     dependency line: say what it replaces, its price and licence (zero-cost), or use the standard library;
+#   - a new file named utils, helpers, common, base, manager, factory, wrapper, abstract, misc: say who needs it.
+# Asking again, with the reason in the reply, goes through. PONYTAIL_GATE=off disables it. Needs jq.
+# Enable (you, in settings.json): hooks.PreToolUse, matcher "Write|Edit|MultiEdit".
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${PONYTAIL_GATE:-on}" = off ] && exit 0
+f=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
+[ -n "$f" ] || exit 0
+base=${f##*/}
+new=$(printf '%s' "$input" | jq -r '[.tool_input.content, .tool_input.new_string, (.tool_input.edits[]?.new_string)] | map(select(. != null)) | join("\n")')
+old=$(printf '%s' "$input" | jq -r '[.tool_input.old_string, (.tool_input.edits[]?.old_string)] | map(select(. != null)) | join("\n")')
+[ -f "$f" ] && [ "$(printf '%s' "$input" | jq -r '.tool_name')" = Write ] && old=$(cat -- "$f")
+case $base in
+package.json | Cargo.toml | go.mod | pyproject.toml | requirements*.txt | Gemfile)
+	dep='^[[:space:]{,]*("[@A-Za-z0-9_./-]+"[[:space:]]*:[[:space:]]*"[~^<>=*0-9]|[A-Za-z0-9_-]+[[:space:]]*=[[:space:]]*("|\{)|[A-Za-z0-9_.-]+(==|>=|~=|<=)[0-9]|require[[:space:]]+[a-z]|gem[[:space:]]+")'
+	added=$(comm -13 <(printf '%s\n' "$old" | sort -u) <(printf '%s\n' "$new" | sort -u) | grep -E -- "$dep" | grep -vE "\"(name|version|description|license|main|type)\"" | head -3)
+	[ -n "$added" ] || exit 0
+	sg_once "dep:$f" || exit 0
+	sg_block "ponytail_gate: a dependency goes into $base:
+$added
+A dependency is not added for a few lines. In the reply say what it replaces, its price and licence, and why the standard library or an installed one does not do; then repeat the edit."
+	;;
+esac
+[ -e "$f" ] && exit 0
+case ${base%.*} in utils | util | helpers | helper | common | base | manager | factory | wrapper | abstract | misc)
+	sg_once "abs:$f" || exit 0
+	sg_block "ponytail_gate: a new file named $base is an abstraction before there is a second user. Name who calls it, or keep the code where it is used; then repeat the write."
+	;;
+esac
+exit 0

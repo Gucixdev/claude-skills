@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# updatedocsgate - Claude Code Stop hook: a new file is not left out of the docs. A file Claude created in this turn
+# (untracked or newly added in git, or added by a commit since the session began) in a folder whose nearest README
+# (the folder's own, else a parent's up to the repo root) does not mention its name is handed back once: add the line
+# to that README (what it is, how it is used), or say in one line why it does not belong there. Existing files that
+# were only edited are not checked; nor are tests, data, lock files and README files themselves.
+#
+# Handed back once per file. UPDATEDOCS_GATE=off disables it. Needs jq and git; without them the hook does nothing.
+# Enable (you, in settings.json): hooks.Stop, command ~/.claude/hooks/updatedocsgate.
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${UPDATEDOCS_GATE:-on}" = off ] && exit 0
+sg_limited && exit 0
+command -v git > /dev/null 2>&1 || exit 0
+turn=$(sg_turn)
+[ -n "$turn" ] || exit 0
+start=$(cat "$sg_state/start.$sid" 2> /dev/null)
+missing=''
+while IFS=$'\t' read -r k path; do
+	[ "$k" = E ] && [ -f "$path" ] || continue
+	d=$(dirname -- "$path")
+	root=$(git -C "$d" rev-parse --show-toplevel 2> /dev/null) || continue
+	rel=${path#"$root"/}
+	case $rel in README* | */README* | readme* | tests/* | */tests/* | test/* | */test/* | LICENSE* | *.lock | *.json | *.tsv | *.csv | *.md) continue ;; esac
+	st=$(git -C "$root" status --porcelain -- "$rel" 2> /dev/null | cut -c1-2)
+	case $st in '??' | 'A '* | ' A' | 'AM') ;; *)
+		[ -n "$start" ] && [ -n "$(git -C "$root" log --since="@$start" --diff-filter=A --format=%h -- "$rel" 2> /dev/null)" ] || continue ;;
+	esac
+	readme=''
+	cur=$d
+	while :; do
+		for r in "$cur"/README.md "$cur"/README; do [ -f "$r" ] && { readme=$r; break; }; done
+		[ -n "$readme" ] || [ "$cur" = "$root" ] || [ "$cur" = / ] && break
+		cur=$(dirname -- "$cur")
+	done
+	[ -n "$readme" ] || continue
+	grep -qF -- "$(basename -- "$path")" "$readme" && continue
+	sg_once "docs:$path" || continue
+	missing+="
+  $rel - not in ${readme#"$root"/}"
+done <<< "$turn"
+[ -n "$missing" ] || exit 0
+sg_block "updatedocsgate: new files the docs do not mention:$missing
+Add each to that README (one line: what it is, how it is used), or say in one line why it does not belong there."

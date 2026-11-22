@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# debug_gate - Claude Code Stop hook: a turn that fixes a bug does not end until a test failed before the fix and
+# passes after it, both runs in this turn (red, then green); a fix without that proof comes back as not closed.
+#
+# A fix turn: his message has bug, błąd, napraw/fix, crash, nie działa, broken, regression, fails... and Claude edited
+# code (by extension, or a file in hooks/ bin/ tools/; docs and notes are not code). A test run: bats, pytest, cargo
+# test, go test, npm test, make test/check, ./test, ./check, bin/skills check and the like - passed or failed by the
+# result of the Bash call. Handed back once per message of his (a one-line reason that no test fits ends it), so it
+# reminds, it does not loop. DEBUG_GATE=off disables it. Needs jq; without it the hook does nothing.
+# Enable (you, in settings.json): hooks.Stop, command ~/.claude/hooks/debug_gate.
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${DEBUG_GATE:-on}" = off ] && exit 0
+sg_limited && exit 0
+turn=$(sg_turn)
+[ -n "$turn" ] || exit 0
+sg_seq "$turn"
+[ "$fix" = 1 ] && [[ $seq == *E* ]] || exit 0
+[[ $seq == *F*E*P* ]] && exit 0
+ln=$(printf '%s\n' "$turn" | awk -F'\t' '$1 == "U" { n = $2 } END { print n }')
+sg_once "debug:$ln" || exit 0
+if [[ $seq == *F* ]]; then what='a test failed, the code was changed, but no test run after the change passed'
+elif [[ $seq == *P* ]]; then what='the tests only ever passed: nothing showed the bug before the fix (no red run)'
+else what='no test run in this turn at all'; fi
+sg_block "debug_gate: this turn fixed a bug and $what. Write (or find) the test that fails on the old code, run it red, then green after the fix - both runs in this turn - or say in one line why no test can show it."

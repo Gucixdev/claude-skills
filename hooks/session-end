@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# session-end - two Claude Code hooks in one file, by the event on stdin:
+#
+#   Stop        finished work is not left uncommitted: the files Claude edited in this session (Edit, Write, MultiEdit,
+#               NotebookEdit in the transcript) that are inside a git repo and still uncommitted - minus those already
+#               uncommitted when the session began (his, stored by session-start) - are handed back once (exit 2):
+#               commit them, or say in one line why not. The same list is never handed back twice, so it reminds,
+#               it does not nag; END_GATE_MAX (default 3) caps the reminders a session.
+#   SessionEnd  one line in the journal (${SESSION_GATE_DIR}/journal.md): date, folder, the files edited, the commits
+#               made since the session began in their repos; then claude-config is pushed when it is clean and ahead
+#               of its remote (his rule: it is pushed after every round; END_SESSION_PUSH=0 turns that off); and the
+#               session is queued for the skill factory (bin/skills-factory: a digest the next session turns into
+#               skills; SKILLS_FACTORY=off turns that off).
+#
+# Settings as session-start (SESSION_CONFIG_DIR, SESSION_GATE_DIR); END_GATE=off disables the Stop check. Needs jq;
+# without it the hook does nothing. Enable (you, in settings.json): hooks.Stop and hooks.SessionEnd, command
+# ~/.claude/hooks/session-end.
+
+set -u
+
+cfg=${SESSION_CONFIG_DIR:-${CLAUDE_CONFIG:-$HOME/.claude-config}}
+state=${SESSION_GATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/session-gate}
+
+[ -t 0 ] && { sed -n '2,/^$/s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+command -v jq > /dev/null 2>&1 || exit 0
+input=$(cat)
+event=$(printf '%s' "$input" | jq -r '.hook_event_name // empty' 2> /dev/null)
+sid=$(printf '%s' "$input" | jq -r '.session_id // empty' 2> /dev/null | tr -cd 'A-Za-z0-9_-')
+tr_path=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2> /dev/null)
+mkdir -p "$state" 2> /dev/null || exit 0
+
+edited() {	# the files edited in this session, each once, in order
+	[ -f "$tr_path" ] || return 0
+	jq -R -r 'fromjson? // empty | select(.type == "assistant") | .message.content[]?
+		| select(.type == "tool_use" and (.name | test("^(Edit|Write|MultiEdit|NotebookEdit)$")))
+		| (.input.file_path // .input.notebook_path // empty)' "$tr_path" 2> /dev/null | awk '!seen[$0]++'
+}
+
+uncommitted() {	# the edited files still uncommitted in their repo, not his from before
+	local f top
+	edited | while IFS= read -r f; do
+		[ -e "$f" ] || continue
+		case $f in /tmp/* | "${TMPDIR:-/tmp}"/*) continue ;; esac
+		top=$(git -C "$(dirname "$f")" rev-parse --show-toplevel 2> /dev/null) || continue
+		[ -n "$(git -C "$top" status --porcelain -- "$f" 2> /dev/null)" ] || continue
+		[ -n "$sid" ] && [ -f "$state/dirty.$sid" ] && grep -qxF -- "$f" "$state/dirty.$sid" && continue
+		printf '%s\n' "$f"
+	done
+}
+
+case $event in
+Stop)
+	[ "${END_GATE:-on}" = off ] && exit 0
+	list=$(uncommitted)
+	[ -n "$list" ] || exit 0
+	key=${sid:-nosession}
+	sum=$(printf '%s' "$list" | cksum | cut -d' ' -f1)
+	grep -qxF -- "$sum" "$state/end.$key" 2> /dev/null && exit 0	# this list was handed back once already
+	n=$(wc -l < "$state/end.$key" 2> /dev/null || echo 0)
+	[ "$n" -ge "${END_GATE_MAX:-3}" ] && exit 0
+	printf '%s\n' "$sum" >> "$state/end.$key"
+	{
+		echo "session-end: files you edited in this session are not committed:"
+		printf '%s\n' "$list" | head -n 30 | sed 's/^/  /'
+		echo "Commit the finished ones (Conventional Commits, his identity in that repo), or say in one line why not (he asked you not to, work in progress). His own changes from before the session are not listed."
+	} >&2
+	exit 2 ;;
+SessionEnd)
+	start=0
+	[ -n "$sid" ] && [ -f "$state/start.$sid" ] && start=$(cat "$state/start.$sid")
+	files=$(edited)
+	commits=$(
+		printf '%s\n' "$files" | while IFS= read -r f; do
+			[ -n "$f" ] || continue
+			git -C "$(dirname "$f")" rev-parse --show-toplevel 2> /dev/null
+		done | sort -u | while IFS= read -r top; do
+			[ "$start" -gt 0 ] || break
+			git -C "$top" log --since="@$start" --format="$(basename "$top") %h %s" 2> /dev/null
+		done
+	)
+	{
+		printf -- '- %s %s: %s files edited' "$(date '+%F %T')" "$(printf '%s' "$input" | jq -r '.cwd // "?"')" \
+			"$(printf '%s' "$files" | grep -c .)"
+		[ -n "$commits" ] && printf '; commits: %s' "$(printf '%s\n' "$commits" | head -n 10 | paste -sd ';' - | sed 's/;/; /g')"
+		printf '\n'
+	} >> "$state/journal.md"
+	[ "${SKILLS_FACTORY:-on}" != off ] && [ -x "$cfg/bin/skills-factory" ] && [ -f "$tr_path" ] &&
+		SESSION_GATE_DIR=$state "$cfg/bin/skills-factory" queue "$tr_path" "${sid:-$(date +%s)}" "$(printf '%s' "$input" | jq -r '.cwd // "?"')"
+	if [ "${END_SESSION_PUSH:-1}" != 0 ] && [ -d "$cfg/.git" ] && [ -z "$(git -C "$cfg" status --porcelain 2> /dev/null)" ]; then
+		ahead=$(git -C "$cfg" rev-list --count '@{u}..HEAD' 2> /dev/null || echo 0)
+		[ "$ahead" -gt 0 ] && timeout 60 git -C "$cfg" push --quiet > /dev/null 2>&1
+	fi
+	exit 0 ;;
+*)
+	exit 0 ;;
+esac

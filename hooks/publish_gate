@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# publish_gate - Claude Code PreToolUse hook for Bash: before anything leaves the machine, check WHAT leaves (push-gate
+# asks WHETHER it may). On git push, gh pr create/merge, gh release create and gh repo create it checks the repo the
+# command runs in (the cwd, or the folder of a "cd DIR &&" or "git -C DIR" in front):
+#   - a LICENSE file exists;
+#   - README.md exists, is at most 100 lines and has no "xD";
+#   - no tracked file carries the local login name ($USER) or the home folder ($HOME) - identity and machine paths
+#     never go public (rules (identity)); the scan is git grep over tracked files, the first hits are listed;
+#   - the tests pass when there is something to run (./check, ./test, tests/*.bats): run here, 120 s at most.
+# Any failure refuses the command (exit 2) with the list. A remote matching $PUSH_GATE_ALLOW (his private backup
+# repo, the same setting push-gate has) is not checked: it is not public. PUBLISH_GATE_TESTS=0 skips the test run;
+# PUBLISH_GATE=off disables the hook. Needs jq and git; without them the hook does nothing.
+# Enable (you, in settings.json): hooks.PreToolUse, matcher "Bash", next to push-gate.
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${PUBLISH_GATE:-on}" = off ] && exit 0
+command -v git > /dev/null 2>&1 || exit 0
+cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
+printf '%s' "$cmd" | grep -qE '(^|[;&|(`]|&&|\|\|)[[:space:]]*(PUSH_OK=1[[:space:]]+)*(git([[:space:]]+(-[Cc][[:space:]]+[^[:space:]]+|-[^[:space:]]+))*[[:space:]]+push|gh[[:space:]]+(pr[[:space:]]+(create|merge)|release[[:space:]]+create|repo[[:space:]]+create))([[:space:]]|$)' || exit 0
+dir=$cwd
+d=$(printf '%s' "$cmd" | sed -nE 's/.*(^|[;&|[:space:]])cd[[:space:]]+("([^"]+)"|([^[:space:];&|]+)).*/\3\4/p; s/.*git[[:space:]]+-C[[:space:]]+("([^"]+)"|([^[:space:]]+)).*/\2\3/p' | head -1)
+[ -n "$d" ] && { d=${d/#\~/$HOME}; [ -d "$d" ] && dir=$d; }
+root=$(git -C "$dir" rev-parse --show-toplevel 2> /dev/null) || exit 0
+[ -n "${PUSH_GATE_ALLOW:-}" ] && git -C "$root" remote -v 2> /dev/null | grep -qF -- "$PUSH_GATE_ALLOW" && exit 0
+bad=''
+compgen -G "$root/LICENSE*" > /dev/null || compgen -G "$root/COPYING*" > /dev/null || bad+="
+  no LICENSE file"
+if [ -f "$root/README.md" ]; then
+	n=$(wc -l < "$root/README.md")
+	[ "$n" -le 100 ] || bad+="
+  README.md is $n lines (at most 100)"
+	grep -qiE '(^|[^[:alpha:]])xd([^[:alpha:]]|$)' "$root/README.md" && bad+="
+  README.md has an xD"
+else bad+="
+  no README.md"; fi
+me=$(id -un)
+hits=$(git -C "$root" grep -I -n -F -e "/home/$me" -e "$HOME" -- . ':!*.bats' 2> /dev/null | head -5)
+[ -z "$hits" ] || bad+="
+  the local home folder is in tracked files:
+$(printf '%s\n' "$hits" | sed 's/^/    /' | cut -c1-160)"
+who=$(git -C "$root" grep -I -l -w -F -e "$me" -- . ':!*.bats' 2> /dev/null | head -5)
+[ -z "$who" ] || bad+="
+  the local login name is in: $(printf '%s' "$who" | tr '\n' ' ')"
+if [ "${PUBLISH_GATE_TESTS:-1}" != 0 ]; then
+	run=''
+	for c in check test; do [ -x "$root/$c" ] && { run=./$c; break; }; done
+	[ -z "$run" ] && ls "$root"/tests/*.bats > /dev/null 2>&1 && command -v bats > /dev/null && run='bats tests/'
+	if [ -n "$run" ]; then
+		# shellcheck disable=SC2086
+		out=$(cd "$root" && timeout 120 $run 2>&1) || bad+="
+  the tests fail ($run):
+$(printf '%s\n' "$out" | tail -5 | sed 's/^/    /' | cut -c1-160)"
+	fi
+fi
+[ -n "$bad" ] || exit 0
+sg_block "publish_gate: $(basename -- "$root") is not ready to leave the machine:$bad
+Fix these, then run the command again. (A private backup remote in PUSH_GATE_ALLOW is not checked.)"

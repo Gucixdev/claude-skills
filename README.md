@@ -19,13 +19,17 @@ body when a task matches. Start with the `claude` skill: it is the map, with eac
 
 Optional hooks (wire them in Claude Code's `settings.json` yourself):
 
-- `hooks/no-rm` - PreToolUse hook for Bash that refuses commands that delete files (`rm`, `find -delete`, `git clean`...)
-  outside `/tmp`, so deleting means moving to the trash.
-- `hooks/goal-gate` - Stop hook: Claude keeps working until a check command passes.
-- `hooks/push-gate`, `secret-guard`, `edit-check`, `snap-before-edit`, `afk-gate` and the session gates
-  (`session-start`, `end-session-gate`, `memorize-gate`) - small hooks, each tested in `tests/`. Their settings come
-  from the environment: `CLAUDE_CONFIG` (a folder with your `todo.md` and `questions.md`), `PUSH_GATE_ALLOW` (a remote
-  that may be pushed without asking).
+- `hooks/no-rm` - PreToolUse hook for Bash that refuses commands that delete files outside `/tmp` (moving to the
+  trash instead); `hooks/goal-gate` - Stop hook: Claude keeps working until a check command passes.
+- `hooks/push-gate`, `secret-guard`, `edit-check`, `snap-before-edit`, `memorize-gate` - small hooks, each tested in
+  `tests/`. Settings come from the environment: `CLAUDE_CONFIG` (a folder with your `todo.md` and `questions.md`),
+  `PUSH_GATE_ALLOW` (a remote that may be pushed without asking).
+- The smart gates share `hooks/smartgates` (run it alone to list them); each header says what it checks and which
+  event it wants, `tests/smartgates.bats` covers them. Stop: `debug_gate` (a bug fix needs a red then a green run),
+  `test_gate`, `caveman_gate` (no opener or closer), `updatedocsgate` (new files named in a README), `tokenlimitgate`
+  (first in the list: after the usage limit the others stand down). PreToolUse: `publish_gate` (Bash: license, README,
+  identity scan, tests before a push), `leanctx_gate` (Read), `ponytail_gate` (Write|Edit), `graphify_gate`
+  (Grep|Glob), `mybashtoolgate` (Bash), `readmegate` (Write|Edit). Sessions: `session-start`, `session-end`.
 - `bin/versions` - every edit Claude makes is stored first, `versions restore` brings it back; `tools/` and `evals/`
   hold small helpers and skill evals.
 
@@ -74,7 +78,7 @@ metadata:
 
 `bin/skills` reads these: `ls` and `tags` to browse, `req NAME` to check what a skill needs on the machine, `check` to
 validate every header and the generated map in `skills/claude/SKILL.md`, `index` to rewrite that map. The full
-standard is in `skills/anything/skill-everything/SKILL.md`.
+standard is in `skills/skill-everything/SKILL.md`.
 
 ## Tests
 
@@ -89,7 +93,7 @@ Keep a skill to one concern and its body short; push detail into `references/`. 
 session, so they cost tokens: write the trigger words, not a summary. Commands, flags and paths in a skill must have
 been checked to exist; mark anything unsure as such. No personal paths, names or machine details in examples. Before a
 commit run `bin/skills index && bin/skills check && bats tests/`, and
-`skills/anything/publish-anything/scripts/publish-check` over the repo. Commits follow Conventional Commits.
+`skills/publish-anything/scripts/publish-check` over the repo. Commits follow Conventional Commits.
 
 ## License
 

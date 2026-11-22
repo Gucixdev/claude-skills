@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # skills-factory - every session becomes a skill, or a line in the skill it belongs to. A hook cannot make Claude write
-# after a session has ended, so the work is passed on: SessionEnd (hooks/end-session-gate) queues a digest of the
+# after a session has ended, so the work is passed on: SessionEnd (hooks/session-end) queues a digest of the
 # finished session, session-start tells the next session that sessions are waiting, and that session turns each into
 # skills in the factory's own folder, skills/factory/factory-NAME/SKILL.md (his skills elsewhere are not touched; he
 # moves one out when he wants it there). No model is called here: the digest is

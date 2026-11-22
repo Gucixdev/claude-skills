@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# leanctx_gate - Claude Code PreToolUse hook for Read: most of a session's bill is input, so a whole large file is not
+# read blind (code (reading)). A Read without offset/limit of a file over 60000 bytes is refused once per file and
+# session; the message says how to take the part that matters (a search, the outline, offset+limit). Asking again
+# reads it whole: a file about to be rewritten or really needed is allowed. Images, PDFs and notebooks are not text
+# and pass.
+#
+# LEANCTX_BYTES changes the size. LEANCTX_GATE=off disables it. Needs jq; without it the hook does nothing.
+# Enable (you, in settings.json): hooks.PreToolUse, matcher "Read".
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${LEANCTX_GATE:-on}" = off ] && exit 0
+f=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
+[ -f "$f" ] || exit 0
+printf '%s' "$input" | jq -e '(.tool_input.offset // .tool_input.limit // .tool_input.pages) != null' > /dev/null 2>&1 && exit 0
+case ${f,,} in *.png | *.jpg | *.jpeg | *.gif | *.webp | *.pdf | *.ipynb | *.svg) exit 0 ;; esac
+size=$(stat -c %s -- "$f" 2> /dev/null || echo 0)
+[ "$size" -gt "${LEANCTX_BYTES:-60000}" ] || exit 0
+sg_once "read:$f" || exit 0
+sg_block "leanctx_gate: $f is $((size / 1000)) KB and a whole read of it stays in the context. Search first (rg -n WORD file), or Read with offset and limit for the part that matters. If it needs reading whole - about to be rewritten - Read it again and it goes through."

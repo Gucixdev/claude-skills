@@ -8,7 +8,7 @@
 #   4. the priority-0 skills from skills/claude/SKILL.md
 #   5. finished sessions waiting in the skill factory (bin/skills-factory) to be turned into skills
 #
-# It also stores, for end-session-gate, when the session began and which files were already uncommitted then (his
+# It also stores, for session-end, when the session began and which files were already uncommitted then (his
 # changes, never counted as Claude's). Never blocks, prints nothing when there is nothing to say for a part.
 # Settings: SESSION_CONFIG_DIR (default $CLAUDE_CONFIG), SESSION_REPOS (default ~/dev),
 # SESSION_GATE_DIR (default ${XDG_STATE_HOME:-~/.local/state}/session-gate). Needs jq for the session id (without it,
@@ -35,7 +35,7 @@ dirty_repos=$(
 	done
 )
 
-if [ -n "$sid" ]; then	# for end-session-gate: the start, and what was his before Claude touched anything
+if [ -n "$sid" ]; then	# for session-end: the start, and what was his before Claude touched anything
 	date +%s > "$state/start.$sid"
 	: > "$state/dirty.$sid"
 	printf '%s\n' "$dirty_repos" | while IFS=$'\t' read -r d _; do

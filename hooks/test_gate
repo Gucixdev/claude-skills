@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# test_gate - Claude Code Stop hook: code was edited in this turn and no test run after the last edit passed - done is a
+# command that exits 0, so the turn does not end on an untested change. Only where there is something to run (a
+# tests/ or test/ folder, ./check, ./test or a Makefile in the repo of the edited file); a bug-fix turn is left to
+# debug_gate, which asks for more.
+#
+# Handed back once per message of his: run the project's check, or say in one line why none applies.
+# TEST_GATE=off disables it. Needs jq; without it the hook does nothing.
+# Enable (you, in settings.json): hooks.Stop, command ~/.claude/hooks/test_gate.
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${TEST_GATE:-on}" = off ] && exit 0
+sg_limited && exit 0
+turn=$(sg_turn)
+[ -n "$turn" ] || exit 0
+sg_seq "$turn"
+[ "$fix" = 0 ] && [[ $seq == *E* ]] || exit 0
+[[ ${seq##*E} == *P* ]] && exit 0
+file=$(printf '%s\n' "$turn" | awk -F'\t' '$1 == "E" && $2 != "" { f = $2 } END { print f }')
+dir=$(dirname -- "$file")
+root=$(git -C "$dir" rev-parse --show-toplevel 2> /dev/null) || exit 0
+run=''
+for c in check test; do [ -x "$root/$c" ] && { run=./$c; break; }; done
+[ -z "$run" ] && ls "$root"/tests/*.bats > /dev/null 2>&1 && run='bats tests/'
+[ -z "$run" ] && { [ -d "$root/tests" ] || [ -d "$root/test" ]; } && run='the tests in tests/'
+[ -z "$run" ] && grep -qE '^(test|check):' "$root/Makefile" 2> /dev/null && run='make test'
+[ -n "$run" ] || exit 0
+ln=$(printf '%s\n' "$turn" | awk -F'\t' '$1 == "U" { n = $2 } END { print n }')
+sg_once "test:$ln" || exit 0
+sg_block "test_gate: code in $(basename "$root") was edited and no test run after the last edit passed. Run $run and fix what fails, or say in one line why none applies."

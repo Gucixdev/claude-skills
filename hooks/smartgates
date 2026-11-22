@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# smartgates - the shared part of the smart hooks (debug_gate, test_gate, caveman_gate, leanctx_gate, ponytail_gate,
+# graphify_gate, mybashtoolgate, readmegate, updatedocsgate, publish_gate, tokenlimitgate): they source this file;
+# it is never wired into settings.json. Run on its own it lists the gates with their first line.
+#
+# What it gives a hook after `. smartgates; sg_init`: input (the event JSON), sid, tr_path, cwd; sg_once KEY (true the
+# first time in a session, so a gate hands a thing back once and reminds, never nags); sg_block TEXT (stderr, exit 2);
+# sg_turn (the events of the current turn from the transcript, one per line: U line-no text = his message, E path =
+# a file edited, B id command = a Bash call, R id 0|1 = its result, A text = what Claude wrote); sg_seq (from sg_turn:
+# seq = F/P/E in order - a test failed, a test passed, code edited - and fix = 1 when his message is about a bug);
+# sg_limited (the usage limit was hit, tokenlimitgate set the mark: the Stop gates stand down).
+# State is ${SESSION_GATE_DIR:-${XDG_STATE_HOME:-~/.local/state}/session-gate}, the same folder session-start uses.
+
+sg_state=${SESSION_GATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/session-gate}
+
+sg_init() {
+	[ -t 0 ] && { sed -n '2,/^$/s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+	command -v jq > /dev/null 2>&1 || exit 0
+	input=$(cat)
+	sid=$(printf '%s' "$input" | jq -r '.session_id // empty' 2> /dev/null | tr -cd 'A-Za-z0-9_-')
+	sid=${sid:-nosession}
+	tr_path=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2> /dev/null)
+	cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2> /dev/null)
+	[ -n "$cwd" ] || cwd=$PWD
+	mkdir -p "$sg_state" 2> /dev/null || exit 0
+}
+
+sg_once() {
+	local f=$sg_state/once.$sid
+	grep -qxF -- "$1" "$f" 2> /dev/null && return 1
+	printf '%s\n' "$1" >> "$f"
+	return 0
+}
+
+sg_block() {
+	printf '%s\n' "$*" >&2
+	exit 2
+}
+
+sg_limited() {	# the mark is only believed for five hours: the limit window resets
+	local f=$sg_state/limit.$sid
+	[ -f "$f" ] && [ -n "$(find "$f" -mmin -300 2> /dev/null)" ]
+}
+
+sg_turn() {
+	[ -f "${tr_path:-}" ] || return 0
+	jq -R -r 'fromjson? // empty
+		| if .type == "user" and ((.isMeta // false) | not) then
+			(.message.content // "") as $c
+			| (if ($c | type) == "string" then [$c] else [$c[]? | select(.type == "text") | .text] end | join(" ")) as $t
+			| (if ($t | length) > 0 and ($t | test("^\\s*<(command|local-command|system-reminder|task-notification)") | not)
+				then "U\t\(input_line_number)\t\($t | gsub("[\t\n\r]"; " "))" else empty end),
+			  (if ($c | type) == "array" then $c[] | select(.type == "tool_result")
+				| "R\t\(.tool_use_id)\t\(if (.is_error // false) then 1 else 0 end)" else empty end)
+		  elif .type == "assistant" then
+			.message.content[]?
+			| if .type == "tool_use" then
+				if (.name | test("^(Edit|Write|MultiEdit|NotebookEdit)$")) then "E\t\(.input.file_path // .input.notebook_path // "")"
+				elif .name == "Bash" then "B\t\(.id)\t\((.input.command // "") | gsub("[\t\n\r]"; " "))"
+				else empty end
+			  elif .type == "text" then "A\t\(.text | gsub("[\t\n\r]"; " "))"
+			  else empty end
+		  else empty end' "$tr_path" 2> /dev/null \
+		| awk '{ if (substr($0, 1, 2) == "U\t") n = 0; l[++n] = $0 } END { for (i = 1; i <= n; i++) print l[i] }'
+}
+
+# a command that runs a project's tests or checks
+sg_is_test() {
+	printf '%s' "$1" | grep -qE '(^|[^[:alnum:]_./-])(bats|pytest|py\.test|cargo +(test|nextest)|go +test|npm +(run +)?test|pnpm +(run +)?test|yarn +test|make +(test|check)|ctest|rspec|jest|vitest|mojo +test|lake +test|bin/skills +check)([^[:alnum:]_]|$)|(^|[[:space:];&|(])\./(test|check)([[:space:]]|$)'
+}
+
+# a file that is code: by extension, or in a hooks/bin/tools folder (his docs, data and notes are not)
+sg_is_code() {
+	case $1 in /tmp/claude-*/* | */scratchpad/* | */.claude/projects/* | '') return 1 ;; esac
+	case $1 in
+	*.c | *.h | *.cc | *.cpp | *.hpp | *.rs | *.go | *.py | *.sh | *.bash | *.zsh | *.fish | *.js | *.mjs | *.ts | *.tsx | *.jsx | *.lua | *.rb | *.pl | *.el | *.lisp | *.mojo | *.lean | *.gael | *.gd | *.zig | *.sql) return 0 ;;
+	*/hooks/* | */bin/* | */tools/*) case $1 in *.* ) return 1 ;; *) return 0 ;; esac ;;
+	esac
+	return 1
+}
+
+sg_seq() {	# sg_seq TURN
+	local k a b re
+	seq='' fix=0
+	declare -gA sg_istest=()
+	re='(^|[^[:alpha:]])(bug|bugs|blad|błąd|bledy|błędy|napraw[[:alpha:]]*|fix[[:alpha:]]*|crash[[:alpha:]]*|zepsut[[:alpha:]]*|nie dzia[lł]a[[:alpha:]]*|broken|regress[[:alpha:]]*|fail[[:alpha:]]*|wywala[[:alpha:]]*|pada)([^[:alpha:]]|$)'
+	while IFS=$'\t' read -r k a b; do
+		# shellcheck disable=SC2034
+		case $k in
+		U) printf '%s' "$b" | grep -qiE -- "$re" && fix=1 ;;
+		E) sg_is_code "$a" && seq+=E ;;
+		B) sg_is_test "$b" && sg_istest[$a]=1 ;;
+		R) [ -n "${sg_istest[$a]:-}" ] && { [ "$b" = 1 ] && seq+=F || seq+=P; } ;;
+		esac
+	done <<< "$1"
+}
+
+# run on its own: the list
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+	for f in "$(dirname "$(readlink -f "$0")")"/*gate; do
+		[ -f "$f" ] && printf '%-16s %s\n' "${f##*/}" "$(sed -n '2s/^# *[^ ]* - //p' "$f")"
+	done
+fi

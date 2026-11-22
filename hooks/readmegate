@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# readmegate - Claude Code PreToolUse hook for Write|Edit|MultiEdit on README*.md: a README stays short and clean
+# (conventions (readme)): at most READMEGATE_MAX lines (default 100; the rest goes into docs/ or the README of the
+# folder it is about) and no "xD" in it, because a README is read by others. A Write or an Edit that would leave the
+# file longer than the cap, or that brings in xD, is refused with the count; an Edit that makes a README that is
+# already too long shorter passes. His own notes (braindump, todo, questions) are not READMEs and are not touched.
+#
+# READMEGATE=off disables it. Needs jq; without it the hook does nothing.
+# Enable (you, in settings.json): hooks.PreToolUse, matcher "Write|Edit|MultiEdit".
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${READMEGATE:-on}" = off ] && exit 0
+f=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
+case ${f##*/} in README | README.md | README.*.md | readme.md) ;; *) exit 0 ;; esac
+max=${READMEGATE_MAX:-100}
+tool=$(printf '%s' "$input" | jq -r '.tool_name // empty')
+cur=0
+[ -f "$f" ] && cur=$(wc -l < "$f")
+if [ "$tool" = Write ]; then
+	text=$(printf '%s' "$input" | jq -r '.tool_input.content // empty')
+	after=$(printf '%s\n' "$text" | wc -l)
+else
+	text=$(printf '%s' "$input" | jq -r '[.tool_input.new_string, (.tool_input.edits[]?.new_string)] | map(select(. != null)) | join("\n")')
+	gone=$(printf '%s' "$input" | jq -r '[.tool_input.old_string, (.tool_input.edits[]?.old_string)] | map(select(. != null)) | join("\n")')
+	after=$((cur + $(printf '%s\n' "$text" | wc -l) - $(printf '%s\n' "$gone" | wc -l)))
+fi
+why=''
+printf '%s' "$text" | grep -qiE '(^|[^[:alpha:]])xd([^[:alpha:]]|$)' && why="it has an xD"
+if [ "$after" -gt "$max" ] && [ "$after" -gt "$cur" ]; then why="${why:+$why; }it would be $after lines (at most $max)"; fi
+[ -n "$why" ] || exit 0
+sg_block "readmegate: $(basename -- "$(dirname -- "$f")")/${f##*/} refused: $why. A README is read by others: no xD, at most $max lines - details go into docs/ or the README of the folder they are about."

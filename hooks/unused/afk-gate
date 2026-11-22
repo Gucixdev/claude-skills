@@ -11,9 +11,11 @@
 # As the hook (no arguments, the Stop event's JSON on stdin): with neither mode on, expired or past the cap - exit 0,
 # Claude may stop. In auto mode the hook looks at the transcript (path in the JSON): the last entry written by a
 # human (origin.kind "human"; task notifications, hand-backs and tool results do not count) gives the idle time.
-# Idle already at the limit: the stop is blocked. Not yet: the hook waits (poll every AFK_GATE_POLL=5 s, at most
-# AFK_GATE_WAIT=1700 s, the hook timeout in settings.json must be longer) until the limit is reached, then blocks; a
-# new message from him in the meantime ends the wait with exit 0. A stop that is blocked is counted and exit 2 sends
+# The hook only runs when Claude stops, so Claude is idle by definition; it then waits IDLE (poll every
+# AFK_GATE_POLL=5 s; the hook timeout in settings.json must be longer than IDLE) for a message from him. One
+# arrives: exit 0, he is here. None: the stop is blocked. His silence is counted from the moment Claude stopped, never
+# from his last message, so time Claude spent working does not count as him being away. Once blocked and he still
+# has not written since, later stops are blocked at once (state file blocked_at). A stop that is blocked is counted and exit 2 sends
 # Claude back to work with the first open item of todo.md. The cap (default 300 blocked stops, AFK_GATE_MAX) is the
 # brake against a loop that makes no progress; at the cap the mode switches itself off and the reason is shown to him.
 # An item is open unless the line holds "zrobione", "done" or "blocked". No transcript, no timestamp: no block.
@@ -45,11 +47,11 @@ left() {	# seconds until the forced mode ends, 0 when off or expired
 	[ "$u" -gt "$now" ] 2> /dev/null && echo $((u - now)) || echo 0
 }
 
-last_human() {	# last_human TRANSCRIPT -> epoch seconds of his newest message, empty when unknown
+last_human() {	# last_human TRANSCRIPT -> epoch milliseconds of his newest message, empty when unknown
 	local ts
 	[ -r "${1:-}" ] || return 1
 	ts=$(tail -c 4000000 "$1" | jq -R -r 'fromjson? | select(.type == "user" and .origin.kind == "human") | .timestamp' 2> /dev/null | tail -n 1)
-	[ -n "$ts" ] && date -d "$ts" +%s 2> /dev/null
+	[ -n "$ts" ] && date -d "$ts" +%s%3N 2> /dev/null
 }
 
 case ${1:-} in
@@ -59,6 +61,7 @@ auto)
 	mkdir -p "$dir" || exit 2
 	echo "$s" > "$dir/idle"
 	echo 0 > "$dir/count"
+	rm -f -- "$dir/blocked_at"
 	echo "afk-gate: auto, after $((s / 60)) min ($s s) of silence from you Claude cannot stop while todo.md has open lines ($todo)"
 	exit 0 ;;
 on)
@@ -69,7 +72,7 @@ on)
 	echo "afk-gate: forced for $((s / 60)) minutes; Claude cannot stop while todo.md has open lines ($todo)"
 	exit 0 ;;
 off)
-	rm -f -- "$dir/until" "$dir/idle" 2> /dev/null
+	rm -f -- "$dir/until" "$dir/idle" "$dir/blocked_at" 2> /dev/null
 	echo "afk-gate: off"
 	exit 0 ;;
 status)
@@ -100,21 +103,25 @@ next=$(grep -vE '^[[:space:]]*(#|$)|zrobione|[Dd]one|[Bb]locked' "$todo" 2> /dev
 [ -n "$next" ] || exit 0	# nothing open: stopping is fine
 
 why="forced, $((l / 60)) minutes left"
-if [ "$l" -le 0 ]; then	# auto: wait for the silence to reach the limit
+if [ "$l" -le 0 ]; then	# auto: act only when neither of us has done anything for the idle time
 	tp=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2> /dev/null)
 	seen=$(last_human "$tp") || exit 0
-	waited=0 wait=${AFK_GATE_WAIT:-1700} poll=${AFK_GATE_POLL:-5}
-	while :; do
-		quiet=$(($(date +%s) - seen))
-		[ "$quiet" -ge "$idle" ] && break
-		[ "$waited" -ge "$wait" ] && exit 0
-		sleep "$poll"
-		waited=$((waited + poll))
-		now=$(last_human "$tp") || exit 0
-		[ "$now" -gt "$seen" ] && exit 0	# he wrote: he is here
-	done
-	why="auto, you were quiet for $((quiet / 60)) minutes"
+	# The clock starts when I stopped (now), not at his last message: my own working time is not his silence.
+	# Already blocked since he last wrote: he is still gone, no second wait.
+	lastblock=$(cat "$dir/blocked_at" 2> /dev/null || echo 0)
+	start=$(date +%s)
+	if [ "$seen" -gt "$lastblock" ]; then
+		wait=${AFK_GATE_WAIT:-1700} poll=${AFK_GATE_POLL:-5}
+		[ "$idle" -le "$wait" ] || exit 0	# the hook timeout would hit first
+		while [ $(($(date +%s) - start)) -lt "$idle" ]; do
+			sleep "$poll"
+			now=$(last_human "$tp") || exit 0
+			[ "$now" -gt "$seen" ] && exit 0	# he wrote: he is here
+		done
+	fi
+	why="auto, nobody did anything for $((idle / 60)) min"
 fi
+date +%s%3N > "$dir/blocked_at"
 echo $((n + 1)) > "$dir/count"
 {
 	printf 'AFK mode is on (%s). Blocked stops so far: %d (safety brake at %d). He is away and wants work to continue: do real work, do not stop, do not ask, and do not repeat that you are blocked or out of limit.\n' \

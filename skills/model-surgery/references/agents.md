@@ -8,7 +8,7 @@ because the agent is only as good as the model you picked and checked ([SKILL.md
 
 1. **The loop**: send messages and tool definitions, run the tool calls the model returns, append the results, repeat until it answers without a tool call. Everything else is a limit or a log around that.
 2. **Hard limits**: a step limit, a token/money budget, a wall-clock timeout per tool call. An agent without them loops until the account is empty.
-3. **Few tools, sharp ones**: each with a one-line description that says when *not* to use it, typed arguments, and an error message the model can act on ("file not found, did you mean X"). Prefer one `run(command)` plus a good CLI ([cli-everything](../../anything/cli-everything/SKILL.md)) to thirty thin tools.
+3. **Few tools, sharp ones**: each with a one-line description that says when *not* to use it, typed arguments, and an error message the model can act on ("file not found, did you mean X"). Prefer one `run(command)` plus a good CLI ([cli-everything](../../cli-everything/SKILL.md)) to thirty thin tools.
 4. **Show before doing**: writes, deletes, sends and spends are returned as a plan and executed only after an explicit yes (the `--yes` convention in his tools). Read-only tools run freely.
 5. **State outside the model**: the task list, notes and results in files (TSV/JSONL/SQLite); the model re-reads them each step, so a restart or a context cut loses nothing.
 6. **Keep the context small**: tool output cut to what is needed (head/tail/grep before returning), old steps summarised, no whole-file dumps ([code (output)](../../code/references/output.md)).
@@ -27,7 +27,7 @@ because the agent is only as good as the model you picked and checked ([SKILL.md
 
 ### How to write one (for his repos)
 
-1. **Commands first**, exact and runnable: build, one test, all tests, lint, run. `./run`, `./test`, `./check` for his repos ([distribute-everything](../../anything/distribute-everything/SKILL.md)). An agent that cannot run the checks cannot say "done".
+1. **Commands first**, exact and runnable: build, one test, all tests, lint, run. `./run`, `./test`, `./check` for his repos ([distribute-everything](../../distribute-everything/SKILL.md)). An agent that cannot run the checks cannot say "done".
 2. **Only what an agent cannot learn by reading the code**: a convention that is not obvious, a trap that already cost time, what is generated and must not be edited, what is slow or dangerous to run (network, root, the live compositor).
 3. **Rules as "never"/"always" with the reason in half a line.** A rule without a reason gets argued with or ignored.
 4. Boundaries: what needs asking first (push, delete, spend money, network), where secrets live and that they are never printed ([rules](../../rules/SKILL.md)).
@@ -55,7 +55,7 @@ Decide by what you need, not by popularity. Many tasks need none: a loop that ca
 
 ### Protocols
 
-- **MCP** (Model Context Protocol): how an agent reaches tools and data. Here it is the last resort after CLI and REST ([mcp](../../anything/cli-everything/references/mcp.md)).
+- **MCP** (Model Context Protocol): how an agent reaches tools and data. Here it is the last resort after CLI and REST ([mcp](../../cli-everything/references/mcp.md)).
 - **A2A** (agent-to-agent, started at Google, now under the Linux Foundation, UNSURE): how separate agents talk to each other. You need it only when agents from different vendors must cooperate.
 
 ### Picking (his constraints)

@@ -10,6 +10,6 @@ build a small subscription web app the cheap way	code/references/saas.md
 find out why my program crashes only sometimes	code/references/debug.md
 what should the README of my project contain	conventions/references/readme.md
 write a static web page with no frameworks	ui/references/webdev.md
-design a RISC-V core and check it against a reference model	anything/hardware-anything/references/cpu.md
-when is it acceptable to add an MCP server	anything/cli-everything/references/mcp.md
+design a RISC-V core and check it against a reference model	hardware-anything/references/cpu.md
+when is it acceptable to add an MCP server	cli-everything/references/mcp.md
 I have several open threads in a long session and keep losing track	workflow/references/task-stack.md

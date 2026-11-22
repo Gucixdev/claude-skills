@@ -17,7 +17,7 @@
 #   skills install [-n] [DIR]   link every skill into DIR (default ~/.claude/skills); whatever was in the way goes to
 #                               the trash, never deleted; -n prints what it would do
 #
-# The header standard is in skills/anything/skill-everything/SKILL.md. SKILLS_DIR overrides the skills/ folder next to bin/.
+# The header standard is in skills/skill-everything/SKILL.md. SKILLS_DIR overrides the skills/ folder next to bin/.
 # Exit status: 0 fine, 1 a check failed or a requirement is missing, 2 bad usage.
 # Example: skills ls '#bash' '#cli'; skills req bash-everything; skills check && skills install
 set -u

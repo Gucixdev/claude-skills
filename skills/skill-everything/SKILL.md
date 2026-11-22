@@ -60,7 +60,7 @@ renaming: `bin/skills index`.
 ## Lessons from a session into skills
 
 Every session feeds this (his wish, 2026-11-19: "z kazdej sesji robi skilla" - a small skill factory): SessionEnd
-(`hooks/end-session-gate`) queues a digest of the finished session - his corrections and wishes, all his messages,
+(`hooks/session-end`) queues a digest of the finished session - his corrections and wishes, all his messages,
 the tools, commands and files - and `hooks/session-start` says in the next session how many wait. Take each with
 `bin/skills factory next`; the factory has its own folder, `skills/factory/` (his words: "ma poprostu swoj wlasny
 folder gdzie tworzy skille"): its skills are `factory-NAME/SKILL.md`, priority 2, `#factory` among the tags, and it

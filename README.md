@@ -26,10 +26,10 @@ Optional hooks (wire them in Claude Code's `settings.json` yourself):
   `PUSH_GATE_ALLOW` (a remote that may be pushed without asking).
 - The smart gates share `hooks/smartgates` (run it alone to list them); each header says what it checks and which
   event it wants, `tests/smartgates.bats` covers them. Stop: `debug_gate` (a bug fix needs a red then a green run),
-  `test_gate`, `caveman_gate` (no opener or closer), `updatedocsgate` (new files named in a README), `tokenlimitgate`
-  (first in the list: after the usage limit the others stand down). PreToolUse: `publish_gate` (Bash: license, README,
-  identity scan, tests before a push), `leanctx_gate` (Read), `ponytail_gate` (Write|Edit), `graphify_gate`
-  (Grep|Glob), `mybashtoolgate` (Bash), `readmegate` (Write|Edit). Sessions: `session-start`, `session-end`.
+  `test_gate`, `caveman_gate`, `updatedocsgate`, `knowsunknown_gate` (claims, paths), `evolve_gate` (his failed tool),
+  `tokenlimitgate` (first: after the usage limit the others stand down). PreToolUse: `publish_gate` (license, README,
+  identity scan, tests before a push), `leanctx_gate`, `ponytail_gate`, `graphify_gate`, `mybashtoolgate`,
+  `readmegate`. Sessions: `session-start`, `session-end`.
 - `bin/versions` - every edit Claude makes is stored first, `versions restore` brings it back; `tools/` and `evals/`
   hold small helpers and skill evals.
 

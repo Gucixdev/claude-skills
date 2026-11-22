@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# evolve_gate - Claude Code Stop hook: a tool that misbehaves is improved on the spot (evolve): when one of his own
+# scripts (a file outside /usr, /bin, /sbin, /opt - ./x, ~/x, a path, or a name that resolves to one) failed in this
+# turn, the turn ends only when that script was edited afterwards (a small bug fixed at once) or issues.md was written
+# (the failure with its repro). Test runners and build tools are not scripts in this sense: a red test is the job.
+# Handed back once per script and session. EVOLVE_GATE=off disables it. Needs jq; without it nothing happens.
+# Enable (you, in settings.json): hooks.Stop, command ~/.claude/hooks/evolve_gate.
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${EVOLVE_GATE:-on}" = off ] && exit 0
+sg_limited && exit 0
+turn=$(sg_turn)
+[ -n "$turn" ] || exit 0
+declare -A script_of=() failed_at=()
+i=0
+while IFS=$'\t' read -r k a b; do
+	i=$((i + 1))
+	case $k in
+	B)
+		sg_is_test "$b" && continue
+		case $b in *'&&'* | *';'* | *'|'*) continue ;; esac
+		first=$(printf '%s' "$b" | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*//' | cut -d' ' -f1)
+		first=${first/#\~/$HOME}
+		case $first in */*) f=$first ;; *) f=$(command -v -- "$first" 2> /dev/null) ;; esac
+		[ -f "${f:-}" ] || continue
+		f=$(readlink -f -- "$f")
+		case $f in /usr/* | /bin/* | /sbin/* | /opt/* | /lib/*) continue ;; esac
+		script_of[$a]=$f
+		;;
+	R)
+		[ "$b" = 1 ] && [ -n "${script_of[$a]:-}" ] && failed_at[${script_of[$a]}]=$i
+		;;
+	E)
+		p=$(readlink -f -- "$a" 2> /dev/null || echo "$a")
+		for s in "${!failed_at[@]}"; do
+			{ [ "$p" = "$s" ] || [ "${a##*/}" = issues.md ]; } && [ "$i" -gt "${failed_at[$s]}" ] && unset 'failed_at[$s]'
+		done
+		;;
+	esac
+done <<< "$turn"
+left=''
+for s in "${!failed_at[@]}"; do
+	sg_once "evolve:$s" && left+="
+  $s"
+done
+[ -n "$left" ] || exit 0
+sg_block "evolve_gate: his own tools failed in this turn and were left as they are:$left
+A small bug is fixed now; otherwise the failure goes into issues.md with the command that reproduces it. Then stop."

@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# knowsunknown_gate - Claude Code Stop hook: wie czego nie wie (rules (knows-unknowns)). Two things a hook can see in
+# the final reply, each handed back once per message of his:
+#   - a claim that it works (działa, przechodzi, naprawione, zrobione, works, passes, fixed, verified, done...) after
+#     code was edited in this turn and nothing was run after the last edit: run it, or say "not run";
+#   - an absolute path (/x/y or ~/x/y) that does not exist on this machine - invented, or planned: check it, or say it
+#     is new. URLs, globs, placeholders and paths whose first folder does not exist here are not looked at.
+# The message names the claim or the paths. KNOWSUNKNOWN_GATE=off disables it. Needs jq; without it nothing happens.
+# Enable (you, in settings.json): hooks.Stop, command ~/.claude/hooks/knowsunknown_gate.
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${KNOWSUNKNOWN_GATE:-on}" = off ] && exit 0
+sg_limited && exit 0
+turn=$(sg_turn)
+msg=$(printf '%s' "$input" | jq -r '.last_assistant_message // empty' 2> /dev/null)
+[ -n "$msg" ] || msg=$(printf '%s\n' "$turn" | awk -F'\t' '$1 == "A" { t = $2 } END { print t }')
+[ -n "$msg" ] || exit 0
+ln=$(printf '%s\n' "$turn" | awk -F'\t' '$1 == "U" { n = $2 } END { print n }')
+problems=''
+
+# a claim of success with no run after the last code edit
+edited=0 ran=0
+while IFS=$'\t' read -r k a _; do
+	case $k in
+	E) sg_is_code "$a" && { edited=1; ran=0; } ;;
+	B) ran=1 ;;
+	esac
+done <<< "$turn"
+if [ "$edited" = 1 ] && [ "$ran" = 0 ] \
+	&& printf '%s' "$msg" | grep -qiE '(^|[^[:alpha:]])(działa|dziala|przechodz[[:alpha:]]*|naprawion[[:alpha:]]*|zrobion[[:alpha:]]*|sprawdzon[[:alpha:]]*|works|working|passes|passed|fixed|verified|done)([^[:alpha:]]|$)'; then
+	problems+="
+  it says the work is done or works, but code was edited and nothing was run after the last edit - run it, or say \"not run\""
+fi
+
+# paths that do not exist
+text=$(printf '%s' "$msg" | sed -E 's#[A-Za-z]+://[^[:space:])>"`]*##g')
+missing=''
+while IFS= read -r p; do
+	[ -n "$p" ] || continue
+	full=${p/#\~/$HOME}
+	root=/$(printf '%s' "$full" | cut -d/ -f2)
+	[ -d "$root" ] && [ ! -e "$full" ] && missing+=" $p"
+done < <(printf '%s' "$text" | grep -oE '(^|[[:space:]`("'"'"'])(~|/)[A-Za-z0-9._@+-]*(/[A-Za-z0-9._@+-]+)+' | sed -E 's/^[^~\/]*//; s/[.,;:]+$//' | sort -u | head -20)
+[ -z "$missing" ] || problems+="
+  paths that do not exist here:$missing - check them, or say they are new"
+
+[ -n "$problems" ] || exit 0
+sg_once "knows:${ln:-0}" || exit 0
+sg_block "knowsunknown_gate: the reply claims more than was checked:$problems
+Fix the reply: what was run is stated as run, what was not is \"not checked\"."

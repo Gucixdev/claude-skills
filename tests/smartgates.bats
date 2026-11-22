@@ -23,7 +23,7 @@ result() { jq -cn --arg id "$1" --argjson e "$2" '{type: "user", message: {conte
 @test "smartgates alone lists the gates" {
 	run "$H/smartgates"
 	[ "$status" -eq 0 ]
-	for g in debug_gate test_gate caveman_gate leanctx_gate ponytail_gate graphify_gate mybashtoolgate readmegate updatedocsgate publish_gate tokenlimitgate; do
+	for g in knowsunknown_gate evolve_gate debug_gate test_gate caveman_gate leanctx_gate ponytail_gate graphify_gate mybashtoolgate readmegate updatedocsgate publish_gate tokenlimitgate; do
 		[[ $output == *"$g"* ]]
 	done
 }
@@ -234,5 +234,47 @@ result() { jq -cn --arg id "$1" --argjson e "$2" '{type: "user", message: {conte
 	[[ $output == *"tests fail"* ]]
 	git -C "$R" remote add origin git@github.com:someone/private-backup.git
 	PUSH_GATE_ALLOW=someone/private-backup run "$H/publish_gate" < <(pre Bash '{"command": "git push"}')
+	[ "$status" -eq 0 ]
+}
+
+@test "knowsunknown_gate: a success claim after an edit with nothing run, and a path that does not exist, once" {
+	user "dodaj funkcje"; edit "$R/code.sh"; say "Gotowe, działa. Plik jest w /home/nope-x/zzz/file.c i w $R/code.sh."
+	run "$H/knowsunknown_gate" < <(ev)
+	[ "$status" -eq 2 ]
+	[[ $output == *"nothing was run"* ]]
+	[[ $output == *"/home/nope-x/zzz/file.c"* ]]
+	[[ $output != *"$R/code.sh -"* ]]
+	run "$H/knowsunknown_gate" < <(ev)
+	[ "$status" -eq 0 ]
+}
+
+@test "knowsunknown_gate: a run after the edit, urls and real paths pass" {
+	user "dodaj funkcje"; edit "$R/code.sh"; bash_ b1 "./code.sh"; result b1 false
+	say "Works, see https://github.com/x/y/blob/main/a.c and $R/code.sh."
+	run "$H/knowsunknown_gate" < <(ev)
+	[ "$status" -eq 0 ]
+}
+
+@test "evolve_gate: his own script failed and was left, once; fixed, or written to issues.md, passes" {
+	printf '#!/bin/sh\nexit 1\n' > "$R/tool"; chmod +x "$R/tool"
+	user "uruchom"; bash_ b1 "$R/tool"; result b1 true
+	run "$H/evolve_gate" < <(ev)
+	[ "$status" -eq 2 ]
+	[[ $output == *"$R/tool"* ]]
+	run "$H/evolve_gate" < <(ev)
+	[ "$status" -eq 0 ]
+	: > "$T/tr.jsonl"; rm -rf "$SESSION_GATE_DIR"
+	user "uruchom"; bash_ b1 "$R/tool"; result b1 true; edit "$R/tool"
+	run "$H/evolve_gate" < <(ev)
+	[ "$status" -eq 0 ]
+	: > "$T/tr.jsonl"; rm -rf "$SESSION_GATE_DIR"
+	user "uruchom"; bash_ b1 "$R/tool"; result b1 true; edit "$R/issues.md"
+	run "$H/evolve_gate" < <(ev)
+	[ "$status" -eq 0 ]
+}
+
+@test "evolve_gate: a failing system command or a red test is not a broken tool" {
+	user "uruchom"; bash_ b1 "grep nothing /dev/null"; result b1 true; bash_ b2 "bats tests/"; result b2 true
+	run "$H/evolve_gate" < <(ev)
 	[ "$status" -eq 0 ]
 }

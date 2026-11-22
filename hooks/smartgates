@@ -38,9 +38,16 @@ sg_block() {
 	exit 2
 }
 
-sg_limited() {	# the mark is only believed for five hours: the limit window resets
-	local f=$sg_state/limit.$sid
-	[ -f "$f" ] && [ -n "$(find "$f" -mmin -300 2> /dev/null)" ]
+sg_limit_re=${TOKENLIMIT_RE:-(usage|rate|session|weekly) limit (reached|hit|exceeded)|hit your (usage )?limit|limit reached|resets? (at|in) [0-9]}
+
+# The limit is spent when tokenlimitgate left its mark (believed for five hours: the window resets) or when this very
+# turn ends in the limit text. The second test makes the order of the Stop hooks irrelevant: they may run in parallel.
+sg_limited() {
+	local f=$sg_state/limit.$sid m
+	[ -f "$f" ] && [ -n "$(find "$f" -mmin -300 2> /dev/null)" ] && return 0
+	m=$(printf '%s' "$input" | jq -r '.last_assistant_message // empty' 2> /dev/null)
+	[ -n "$m" ] || m=$(sg_turn | awk -F'\t' '$1 == "A" { t = $2 } END { print t }')
+	printf '%s' "$m" | grep -qiE -- "$sg_limit_re"
 }
 
 sg_turn() {

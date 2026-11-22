@@ -16,10 +16,13 @@ command -v jq > /dev/null || { echo "hooks-install: jq is needed" >&2; exit 1; }
 
 repo=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 live=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
-[ -f "$repo/config/settings.json" ] || { echo "hooks-install: no $repo/config/settings.json" >&2; exit 1; }
+# the settings live next to the repo (config/ of the private repo that carries this one as public/), or inside it
+cfg=${HOOKS_CONFIG:-}
+for c in "$repo/config/settings.json" "$repo/../config/settings.json"; do [ -n "$cfg" ] || { [ -f "$c" ] && cfg=$c; }; done
+[ -f "$cfg" ] || { echo "hooks-install: no config/settings.json beside or in $repo (HOOKS_CONFIG=FILE names one)" >&2; exit 1; }
 
-merged=$(jq --slurpfile src "$repo/config/settings.json" '.hooks = $src[0].hooks' "$live/settings.json") || exit 1
-echo "hooks in the repo config: $(jq -r '.hooks | to_entries | map(.key + " x" + (.value | length | tostring)) | join(", ")' "$repo/config/settings.json")"
+merged=$(jq --slurpfile src "$cfg" '.hooks = $src[0].hooks' "$live/settings.json") || exit 1
+echo "hooks in the repo config: $(jq -r '.hooks | to_entries | map(.key + " x" + (.value | length | tostring)) | join(", ")' "$cfg")"
 echo "live hooks now: $(jq -r '(.hooks // {}) | keys | join(", ") | if . == "" then "none" else . end' "$live/settings.json")"
 [ "$dry" = 1 ] && { echo "dry run: nothing changed"; exit 0; }
 

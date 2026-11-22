@@ -44,6 +44,13 @@ niż na dysku kisić"):
      last big move answers wrongly (2026-11-22: the holyc graph still listed paths that were gone), so refresh first.
    - Notes and decisions worth keeping go into the graph as nodes only through its own tooling; until then they are
      memory and `todo.md`. Later we build our own graphify in TypeScript on the same `graph.json` format (todo.md).
+   Graphify in every phase of a repo (his words, 2026-11-22: "przy kazdym repo zaczynasz od grafu, zmiany tez graf, push
+   tez graf, wszystko graphify"):
+   - Start: a repo not yet in `~/.config/graphify/repos` gets added and built first, then asked, before any find/grep.
+   - Change: before an edit, `get_neighbors` / `query_graph` on the symbol shows its callers and consumers, so none is
+     missed; after the batch, `graphify-sync` again and one query that confirms the new code is wired in.
+   - Push: refresh the graph, check what the commits touch (`get_pr_impact` or neighbors of the changed symbols), say
+     which consumers were looked at. `graphify-out` stays out of git (`.git/info/exclude`), the graph is a local tool.
 2. **GitHub.** A finished, committed piece goes to origin soon after the commit, not after a pile builds up on the
    disk. The standing go-ahead and its limits are in `rules (discipline)`.
 

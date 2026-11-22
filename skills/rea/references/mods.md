@@ -1,8 +1,8 @@
 # rea (mods)
 
-What: change or extend a game the user owns without rewriting it - new content, changed numbers, a hook that reports what
+What: change or extend a game he owns without rewriting it - new content, changed numbers, a hook that reports what
 happens inside. This part is the ladder of how, by engine, and where the line is.
-Boundary (`rea`): single-player and offline, the user's own copy. Online and anti-cheat-protected play is not touched: a mod
+Boundary (`rea`): single-player and offline, his own copy. Online and anti-cheat-protected play is not touched: a mod
 that gives an edge, bypasses a check or runs while the anti-cheat is active is out. Run modded games only in the
 mode where the anti-cheat is not used, and keep a clean install for anything online.
 
@@ -25,7 +25,7 @@ before building anything; a rung 1 or 2 solution beats a hook.
 ## 2. By engine
 
 - **Minecraft (Java):** a data or resource pack needs no code (`pack.mcmeta`, JSON). Code: Fabric (small, fast to
-  update) or NeoForge; Paper plugins on a server the user runs locally. Mappings give readable names for the obfuscated
+  update) or NeoForge; Paper plugins on a server he runs locally. Mappings give readable names for the obfuscated
   game; build with Gradle from the loader's template mod, `./gradlew build`, and the jar goes into `mods/`. Check the
   game version, the loader version and the Java version that pair, since all three move.
 - **Unity (Mono):** BepInEx or MelonLoader into the game folder, a plugin (C#, `dotnet build`) that uses Harmony to
@@ -61,13 +61,13 @@ mymod/
 3. Log, do not guess: a mod that prints what it patched and the values it saw is debuggable; one that does not is not.
 4. Pin the versions in the README (game build, loader, dependencies). When the game updates, the failing test says
    which rung broke.
-5. Ship only what is the user's: code, data tables and changed values. Do not redistribute the game's own assets, binaries or
+5. Ship only what is his: code, data tables and changed values. Do not redistribute the game's own assets, binaries or
    decompiled sources (`ship-anything`, legal basics); a patch format (a diff, a script that edits the user's copy)
    is the clean way.
 
 ## 4. Safety
 
-- Mods are code running with the user's rights: read third-party mods before running them, take them from the loader's
+- Mods are code running with his rights: read third-party mods before running them, take them from the loader's
   official pages, not from re-uploads; no unknown executables.
 - Back up saves. Keep one untouched install.
-- A game that talks to a server is out of scope for hooks (above); a local server the user runs themselves is fine.
+- A game that talks to a server is out of scope for hooks (above); a local server he runs himself is fine.

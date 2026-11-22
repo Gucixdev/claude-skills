@@ -22,6 +22,12 @@ Optional hooks (wire them in Claude Code's `settings.json` yourself):
 - `hooks/no-rm` - PreToolUse hook for Bash that refuses commands that delete files (`rm`, `find -delete`, `git clean`...)
   outside `/tmp`, so deleting means moving to the trash.
 - `hooks/goal-gate` - Stop hook: Claude keeps working until a check command passes.
+- `hooks/push-gate`, `secret-guard`, `edit-check`, `snap-before-edit`, `afk-gate` and the session gates
+  (`session-start`, `end-session-gate`, `memorize-gate`) - small hooks, each tested in `tests/`. Their settings come
+  from the environment: `CLAUDE_CONFIG` (a folder with your `todo.md` and `questions.md`), `PUSH_GATE_ALLOW` (a remote
+  that may be pushed without asking).
+- `bin/versions` - every edit Claude makes is stored first, `versions restore` brings it back; `tools/` and `evals/`
+  hold small helpers and skill evals.
 
 ## Skills
 
@@ -31,11 +37,9 @@ Priority 0 skills apply to every session; the others load when their tags match.
 |---|---|
 | `claude` | the map of all skills by priority and hashtag |
 | `rules` | standing rules: nothing deleted, push only when told, no leaked identity or secrets, calibrated claims, ask only when it changes the work |
-| `leanctx` | short answers, reads by intent, shrunk command output |
 | `workflow` | working without check-ins, goal loops, braindump, brainstorm, councils of models |
-| `code` | build less (the ponytail ladder), language choice, data-oriented C, YAGNI and other thinking tools |
+| `code` | short answers and cheap reads, build less (the ponytail ladder), language choice, data-oriented C, real runs, tests, benchmarks, Lean 4 for optimized C |
 | `conventions` | Conventional Commits, git and GitHub rules, READMEs, docs, e-mail |
-| `verify` | real runs before "done", tests, benchmarks, debugging evidence, Lean 4 for optimized C |
 | `ui` | CLIs, TUIs, web at zero cost, images, video, audio, fonts, 3D from the command line |
 | `rea` | reverse engineering: binaries, formats, protocols, apps, games, hardware, and "the feel" |
 | `model-surgery` | quantize, merge, prune, fine-tune, distill, BitNet, read raw weights, with a before/after check |
@@ -48,6 +52,10 @@ Priority 0 skills apply to every session; the others load when their tags match.
 | `ship-anything` | releases, packaging, where to publish |
 | `publish-anything` | secrets and identity scan before anything goes public (`publish-check`) |
 | `skill-everything` | writing and maintaining skills, the header standard |
+| `decide`, `evolve`, `orchestrator`, `ask-older-brother` | choosing between solutions, improving tools as they are used, routing work and second opinions |
+| `announce-anything`, `which-license` | posting about a repo, picking a licence |
+| `hardware-anything`, `godot`, `whiteboard-programming` | CAD/PCB/RISC-V, Godot and Blender, design before code |
+| `founder`, `economist`, `nonconformist`, `paying-demand` | lenses for product and market decisions |
 
 ## Header standard
 

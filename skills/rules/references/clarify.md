@@ -1,16 +1,16 @@
 # rules (clarify)
 
-Two real failures with one cause: asking what a lookup would answer (the user is often away - `workflow (afk-loop)` - and every
-question costs the user a round trip), and building the wrong thing on a silent guess. Both come from not telling apart
+Two real failures with one cause: asking what a lookup would answer (he is often away - `workflow (afk-loop)` - and every
+question costs him a round trip), and building the wrong thing on a silent guess. Both come from not telling apart
 which kind of uncertainty is in front of me.
 
 ## Which kind
 
-- A fact - a path, a flag, how the code works, what a tool does: never the user's question. Check it (`rules (rtfm)`, the repo,
+- A fact - a path, a flag, how the code works, what a tool does: never his question. Check it (`rules (rtfm)`, the repo,
   `rg`).
-- What the user means: the user's own trail first - the skills (`bin/skills ls`, `rg -i WORD skills/`), memory, the project's
-  CLAUDE.md and questions.md, past chats (search the exact word). Most of the user's shorthand is defined somewhere.
-- What the user wants, with nothing on record: the only kind that may need a question, and only if the next rule says so.
+- What he means: his own trail first - the skills (`bin/skills ls`, `rg -i WORD skills/`), memory, the project's
+  CLAUDE.md and questions.md, past chats (search the exact word). Most of his shorthand is defined somewhere.
+- What he wants, with nothing on record: the only kind that may need a question, and only if the next rule says so.
 
 ## Ask or go
 
@@ -30,14 +30,18 @@ script - almost never needs a question.
 - One message, at most three questions; each with concrete options, my default marked, and what changes with each
   answer - answerable with "1" or "ok". AskUserQuestion when the tool is there, otherwise the rubber-duck form
   (`code (thinking)`).
-- Keep working on everything that does not depend on the answer; the question goes to the project's one questions file, the turn goes on with the todo list
+- `questions.md` is for architectural decisions only - the language of a system, its layout and boundaries, a public
+  interface, a data or file format, anything costly to undo. Not for what has an obvious reading (take it, write the
+  reading into the todo line, go) and not for routine permissions such as "push?" (his rule, 2026-11-19: "takie
+  oczywiste rzeczy ... mozesz odrazu wpisywac do todo").
+- Keep working on everything that does not depend on the answer; the question goes to the one questions.md (claude-config root), the turn goes on with todo.md
   and the work goes on with the default (`workflow (afk-loop)`).
 - The answer is written where it will be found next time - the skill, the project's CLAUDE.md, questions.md marked
   done - so nothing is asked twice.
 
-## The user's shorthand
+## His shorthand
 
 Several requests in one line without punctuation: split them into items first and answer every item. Typos
-("uncertainly" for uncertainty) and coined or merged words (leanrea = lean + rea) are read against the user's existing names -
+("uncertainly" for uncertainty) and coined or merged words (leanrea = lean + rea) are read against his existing names -
 the skill families caveman, leanctx and ponytail, the skill names - and the reading of a coined word is echoed in one
-line, not asked about.
+line, not asked about. The rest of how he talks is in `machine (personal)`.

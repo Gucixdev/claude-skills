@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# fake model for skills-eval tests: with a skill text it answers well, without one it answers badly
+prompt=$(cat)
+if [ -s "${EVAL_SYSTEM:-/dev/null}" ]; then
+	case $prompt in *"rg"*) echo "-l" ;; *) echo "wc -l /tmp/build.log; tail -n 40 /tmp/build.log" ;; esac
+else
+	case $prompt in *"rg"*) echo "Sure! Use -l, hope this helps" ;; *) echo "cat /tmp/build.log" ;; esac
+fi

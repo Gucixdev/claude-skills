@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# versions - earlier contents of files, stored before every change by his Emacs (on every save) and by Claude's
+# edit hook, so any change can be undone, also after the editor or the session is closed.
+#
+#   versions snap FILE...         store FILE's current content as its next version (skipped when unchanged)
+#   versions ls [FILE]            FILE's versions: number, time that content was written, bytes; without FILE every
+#                                 file that has versions, most recent first
+#   versions show FILE [N]        print version N (default: the newest)
+#   versions diff FILE [N]        diff -u from version N (default: the newest) to the current file
+#   versions restore FILE [N]     put version N back; the current content is stored first, so a restore can be undone
+#   versions rewind [-n] TIME [DIR]
+#                                 every file under DIR (default: all) back to its content at TIME, anything date -d
+#                                 reads ("12:00", "2 hours ago", "2026-10-18 11:30"); -n only lists what would change
+#
+# The store is $VERSIONS_STORE, default ${XDG_DATA_HOME:-~/.local/share}/versions: one flat folder,
+# files named the way Emacs names numbered backups (/home/u/x.c becomes !home!u!x.c.~7~: "!" doubled, then "/" to
+# "!"), paths resolved through symlinks, each copy's modification time = when that content was written. Nothing is
+# ever removed from it. VERSIONS_MAX_BYTES (default 20 MiB) skips bigger files.
+# Example: versions diff src/main.c; versions rewind -n '30 min ago' ~/dev/x
+set -u
+umask 077
+
+STORE=${VERSIONS_STORE:-${XDG_DATA_HOME:-$HOME/.local/share}/versions}
+MAX=${VERSIONS_MAX_BYTES:-20971520}
+
+die() { printf 'versions: %s\n' "$*" >&2; exit 2; }
+say() { printf 'versions: %s\n' "$*" >&2; }
+
+base_of() {	# base_of FILE: the store path without the .~N~ suffix
+	local p
+	p=$(realpath -m -- "$1") || return 1
+	p=${p//!/!!}
+	printf '%s/%s' "$STORE" "${p//\//!}"
+}
+
+path_of() {	# path_of BASENAME: the original path back from a store name (no .~N~)
+	printf '%s' "$1" | sed 's/!!/\x01/g; s/!/\//g; s/\x01/!/g'
+}
+
+numbers() {	# numbers BASE: the version numbers of BASE, ascending
+	local f n esc=$1
+	esc=${esc//\\/\\\\} esc=${esc//\*/\\*} esc=${esc//\?/\\?} esc=${esc//\[/\\[}
+	for f in $esc.~*~; do
+		[ -e "$f" ] || continue
+		n=${f##*.~} n=${n%\~}
+		case $n in '' | *[!0-9]*) continue ;; esac
+		printf '%s\n' "$n"
+	done | sort -n
+}
+
+latest() { numbers "$1" | tail -n 1; }
+
+pick() {	# pick FILE [N]: path of version N (default newest), or an error
+	local base n
+	base=$(base_of "$1") || return 1
+	n=${2:-$(latest "$base")}
+	[ -n "$n" ] || { say "no versions of $1"; return 1; }
+	[ -f "$base.~$n~" ] || { say "no version $n of $1"; return 1; }
+	printf '%s\n' "$base.~$n~"
+}
+
+snap_one() {
+	local f=$1 base n size
+	[ -f "$f" ] || return 0	# a new file has no earlier content
+	size=$(stat -c %s -- "$f") || return 1
+	[ "$size" -le "$MAX" ] || { say "skipped $f: $size bytes, over VERSIONS_MAX_BYTES"; return 0; }
+	mkdir -p -- "$STORE" || return 1
+	base=$(base_of "$f") || return 1
+	n=$(latest "$base")
+	if [ -n "$n" ] && cmp -s -- "$f" "$base.~$n~"; then return 0; fi
+	n=${n:-0}
+	# noclobber: > fails when the name exists, so two writers racing for one number never overwrite each other
+	until (set -C; cat -- "$f" > "$base.~$((n + 1))~") 2> /dev/null; do
+		n=$((n + 1))
+		[ "$n" -lt 100000 ] || { say "cannot store $f"; return 1; }
+	done
+	touch -r "$f" -- "$base.~$((n + 1))~"
+}
+
+cmd_snap() {
+	[ $# -gt 0 ] || die "usage: versions snap FILE..."
+	local f rc=0
+	for f; do snap_one "$f" || rc=1; done
+	return $rc
+}
+
+cmd_ls() {
+	local base n f
+	if [ $# -gt 0 ]; then
+		base=$(base_of "$1") || return 1
+		[ -n "$(latest "$base")" ] || { say "no versions of $1"; return 1; }
+		numbers "$base" | sort -rn | while read -r n; do
+			f="$base.~$n~"
+			printf '%s\t%s\t%s\n' "$n" "$(date -d "@$(stat -c %Y -- "$f")" '+%F %T')" "$(stat -c %s -- "$f")"
+		done
+		return 0
+	fi
+	[ -d "$STORE" ] || return 0
+	find "$STORE" -maxdepth 1 -type f -name '*.~[0-9]*~' -printf '%T@\t%f\n' |
+		awk -F '\t' '{ b = $2; sub(/\.~[0-9]+~$/, "", b); c[b]++; if ($1 > t[b]) t[b] = $1 }
+			END { for (b in c) printf "%s\t%d\t%s\n", t[b], c[b], b }' |
+		sort -rn | while IFS=$'\t' read -r t n b; do
+			printf '%s\t%s\t%s\n' "$(path_of "$b")" "$n" "$(date -d "@${t%.*}" '+%F %T')"
+		done
+}
+
+cmd_show() {
+	[ $# -ge 1 ] || die "usage: versions show FILE [N]"
+	local v
+	v=$(pick "$@") || return 1
+	cat -- "$v"
+}
+
+cmd_diff() {
+	[ $# -ge 1 ] || die "usage: versions diff FILE [N]"
+	local v n
+	v=$(pick "$@") || return 1
+	n=${v##*.~} n=${n%\~}
+	diff -u --label "$1 (version $n)" --label "$1" -- "$v" "$1"
+	[ $? -le 1 ]
+}
+
+cmd_restore() {
+	[ $# -ge 1 ] || die "usage: versions restore FILE [N]"
+	local v
+	v=$(pick "$@") || return 1
+	snap_one "$1" || return 1
+	mkdir -p -- "$(dirname -- "$1")" && cat -- "$v" > "$1" || return 1
+	say "restored $1 from ${v##*/}"
+}
+
+cmd_rewind() {
+	local dry='' t under='' f b path cur best bt mt n rc=0
+	[ "${1:-}" = -n ] && { dry=1; shift; }
+	[ $# -ge 1 ] || die "usage: versions rewind [-n] TIME [DIR]"
+	t=$(date -d "$1" +%s 2> /dev/null) || die "cannot read the time '$1'"
+	[ $# -lt 2 ] || under=$(realpath -m -- "$2")
+	[ -d "$STORE" ] || return 0
+	while IFS= read -r b; do
+		path=$(path_of "$b")
+		case $under in '') ;; *) case $path in "$under" | "$under"/*) ;; *) continue ;; esac ;; esac
+		cur=''
+		[ -e "$path" ] && cur=$(stat -c %Y -- "$path")
+		if [ -n "$cur" ] && [ "$cur" -le "$t" ]; then continue; fi	# unchanged since TIME
+		best='' bt=0
+		for n in $(numbers "$STORE/$b"); do
+			mt=$(stat -c %Y -- "$STORE/$b.~$n~")
+			if [ "$mt" -le "$t" ] && [ "$mt" -ge "$bt" ]; then best=$n bt=$mt; fi
+		done
+		if [ -z "$best" ]; then
+			printf 'skip\t%s\tno version from before %s (created or first stored later)\n' "$path" "$1"
+			continue
+		fi
+		printf 'restore\t%s\tversion %s\n' "$path" "$best"
+		[ -n "$dry" ] || cmd_restore "$path" "$best" 2> /dev/null || { say "could not restore $path"; rc=1; }
+	done < <(find "$STORE" -maxdepth 1 -type f -name '*.~[0-9]*~' -printf '%f\n' | sed 's/\.~[0-9]*~$//' | sort -u)
+	return $rc
+}
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+case $cmd in
+snap) cmd_snap "$@" ;;
+ls) cmd_ls "$@" ;;
+show) cmd_show "$@" ;;
+diff) cmd_diff "$@" ;;
+restore) cmd_restore "$@" ;;
+rewind) cmd_rewind "$@" ;;
+-h | --help | help) sed -n '2,/^$/s/^# \{0,1\}//p' "$0" ;;
+*) sed -n '2,/^$/s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+esac

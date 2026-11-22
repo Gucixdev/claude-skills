@@ -1,0 +1,7 @@
+# a Show HN title in the accepted shape, no marketing words
+prompt
+Write only the Show HN title for ginit, a dinit-compatible init and service manager in about 2000 lines of C.
+expect
+^Show HN: ginit
+forbid
+(?i)(revolutionary|blazing|seamless|robust|game-?changer)

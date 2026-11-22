@@ -10,7 +10,7 @@
 #   -t TYPES  quantization types, space separated (default "Q5_K_M Q4_K_M IQ4_XS Q3_K_M")
 #   -i FILE   imatrix.dat for llama-quantize --imatrix
 #   -o DIR    where the quantized files and sweep.tsv go (default: next to SOURCE)
-#   -n N      -ngl for llama-perplexity (default 0 = CPU; a 4 GB GPU takes small models only)
+#   -n N      -ngl for llama-perplexity (default 0 = CPU; the 1050 Ti 4 GB takes small models only)
 #   -S        do not measure the source itself (its perplexity is the baseline; skip only if you already know it)
 #   -x        extra arguments for llama-perplexity, e.g. -x "-c 512 --chunks 20" to bound the time
 # Binaries: $LLAMA_BIN/llama-quantize and llama-perplexity, else from PATH. Exit 0, 1 a step failed, 2 bad usage.

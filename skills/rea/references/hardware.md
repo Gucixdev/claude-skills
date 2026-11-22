@@ -1,6 +1,6 @@
 # rea (hardware)
 
-Physical parts, boards, devices and firmware - the user's own, or interoperability (`rea` boundaries). A repairer's habit
+Physical parts, boards, devices and firmware - his own, or interoperability (`rea` boundaries). A repairer's habit
 applies throughout: observe first, change one thing at a time, write down what each probe showed.
 
 Three kinds of target, one method: measure it, write the numbers into a model, check the model against the real thing.

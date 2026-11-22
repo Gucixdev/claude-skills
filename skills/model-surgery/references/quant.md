@@ -1,6 +1,6 @@
 # Quantization (GGUF with llama.cpp)
 
-Goal: a file that runs on a small GPU (4 GB) or on CPU, with the quality loss measured, not assumed.
+Goal: a file that runs on the 1050 Ti (4 GB) or on CPU, with the quality loss measured, not assumed.
 
 ## What fits
 
@@ -27,13 +27,13 @@ smaller model at 4 bits over a bigger one at 2-3 bits.
 6. **Quantize**: `llama-quantize --imatrix imatrix.dat model-bf16.gguf model-Q4_K_M.gguf Q4_K_M`. Make two or three types
    (for example Q4_K_M, IQ4_XS, Q3_K_M) so the next step has something to compare.
 7. **Measure** with the check in SKILL.md, against the bf16 or the highest type you can run: perplexity
-   (`llama-perplexity -m FILE -f heldout.txt`), then the task metric. For a prover, run a proof-search harness (ask the model for proofs, let Lean check them, count the accepted ones) on the same
+   (`llama-perplexity -m FILE -f heldout.txt`), then the task metric. For a prover, run `symbiote/bin/freeworker (its own repo)` on the same
    `goals.md` for each file and compare the proofs found.
 8. **Run it**: `llama-cli -m FILE -ngl N -c 4096 -p ...`; raise N until VRAM is full, check `nvidia-smi`. Or in ollama:
    `Modelfile` with `FROM ./model-Q4_K_M.gguf`, the model's `TEMPLATE`, `PARAMETER stop ...`, then `ollama create NAME -f Modelfile`.
 9. Keep the bf16 GGUF; write the RECIPE.md (llama.cpp commit, imatrix file, types).
 
-## Other formats (GPU, more VRAM than a small box has)
+## Other formats (GPU, more VRAM than this machine has)
 
 - **GPTQ / AWQ**: need a GPU with enough memory to hold the model during calibration (AutoAWQ, llm-compressor);
   weights-only 4-bit; served by vLLM. Same steps in spirit: calibration set from the domain, quantize, measure.

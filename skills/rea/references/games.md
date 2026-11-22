@@ -1,8 +1,8 @@
 # rea (games)
 
-What: a game the user owns - to learn how it is built, read a save, extract its own assets for modding, or measure its feel.
+What: a game he owns - to learn how it is built, read a save, extract its own assets for modding, or measure its feel.
 How: find the engine, unpack the container, read the logic that is stored as scripts or data tables, diff saves.
-Only games the user owns and only for understanding or interoperability; no cracking, no DRM or anti-cheat work (`rea`
+Only games he owns and only for understanding or interoperability; no cracking, no DRM or anti-cheat work (`rea`
 boundaries).
 
 ## 1. Which engine
@@ -32,7 +32,7 @@ ls GAME_DIR; file GAME_DIR/*; ls GAME_DIR/*_Data 2>/dev/null
 - Tool: GDRE Tools (gdsdecomp, "Godot RE Tools"): recovers a project from a `.pck`/exe, including decompiled scripts and
   converted resources. It is not in the Arch repos here; fetch the release from its GitHub project and check the
   version against the engine version (`strings EXE | rg 'Godot Engine v'`).
-- The user's own games are not obfuscated: if a Godot project is the user's, read it in the editor, not through this.
+- His own games are not obfuscated: if a Godot project is his, read it in the editor, not through this.
 - What to read first: `project.godot` (autoloads, input map, physics ticks), the player script for the constants
   (gravity, speed, jump velocity, coyote time) - those are the real numbers behind the feel, so read them before
   measuring anything (`vibe`).
@@ -71,5 +71,5 @@ Changing the game instead of reading it: [mods](mods.md). Two games running toge
 ## 7. Result
 
 Per game, in `re/` then `docs/`: the engine and version, the container layout, the data tables you read (as
-tables), the constants that define the feel (`vibe`), and the save layout. What goes into the user's own code is the
+tables), the constants that define the feel (`vibe`), and the save layout. What goes into his own code is the
 numbers and the rules, written fresh; the game's art, audio and code are not redistributed (`ship-anything`, legal basics).

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# memorize-gate - Claude Code Stop hook: when he corrected Claude in this session and no lesson was written after it,
+# Claude cannot end its turn once for that correction; the hook hands it his words and asks for the lesson to be
+# written where it will be found next time (the skill it belongs to, the memory). Text in a skill cannot make sure
+# a correction is kept, a hook can.
+#
+# A correction: one of his messages that starts with "nie" as a word ("no" is left out: in Polish it mostly agrees), or has zle/źle, mowilem/mówiłem,
+# przeciez/przecież, mialo byc/miało być, ile razy, znowu, nie tak, nie rob/rób, wrong, I told you, I said (case
+# ignored). A lesson written: after that message, an Edit/Write/MultiEdit of a file under skills/, memory/, a
+# CLAUDE.md or .claude/, or a mcp__memory__ write. Each correction is handed back at most once (its line in the
+# transcript is stored), so a one-off remark costs one line of reply ("not a lasting lesson: ..."), not a loop.
+#
+# State: ${SESSION_GATE_DIR:-${XDG_STATE_HOME:-~/.local/state}/session-gate}/memo.SESSION. MEMORIZE_GATE=off
+# disables it. Needs jq; without it the hook does nothing. Enable (you, in settings.json): hooks.Stop, command
+# ~/.claude/hooks/memorize-gate.
+
+set -u
+
+state=${SESSION_GATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/session-gate}
+
+[ -t 0 ] && { sed -n '2,/^$/s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+[ "${MEMORIZE_GATE:-on}" = off ] && exit 0
+command -v jq > /dev/null 2>&1 || exit 0
+input=$(cat)
+sid=$(printf '%s' "$input" | jq -r '.session_id // empty' 2> /dev/null | tr -cd 'A-Za-z0-9_-')
+tr_path=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2> /dev/null)
+[ -f "$tr_path" ] || exit 0
+mkdir -p "$state" 2> /dev/null || exit 0
+
+# the transcript as lines: "U<TAB>N<TAB>text" for his messages, "W<TAB>N" for a lesson written (N: the JSONL line)
+stream=$(jq -R -r 'fromjson? // empty
+	| if .type == "user" and (.isMeta | not) then
+		(.message.content | if type == "string" then . elif type == "array" then ([.[] | select(.type == "text") | .text] | join(" ")) else "" end) as $t
+		| if ($t | length) > 0 and ($t | test("^\\s*<(command|local-command|system-reminder|task-notification)") | not)
+		  then "U\t\(input_line_number)\t\($t | gsub("[\t\n\r]"; " "))" else empty end
+	  elif .type == "assistant" then
+		.message.content[]? | select(.type == "tool_use")
+		| select((.name | test("^mcp__memory__memory_(write|str_replace|append)$"))
+			or ((.name | test("^(Edit|Write|MultiEdit)$"))
+				and ((.input.file_path // "") | test("(^|/)(skills|memory)/|(^|/)CLAUDE\\.md$|(^|/)\\.claude/"))))
+		| "W\t\(input_line_number)"
+	  else empty end' "$tr_path" 2> /dev/null)
+
+corr='^[[:space:]]*nie([[:space:],.!?]|$)|(^|[^[:alpha:]])(zle|źle|mowilem|mówiłem|mowilam|mówiłam|przeciez|przecież|mialo byc|miało być|ile razy|znowu|nie tak|nie rob|nie rób|wrong|i told you|i said)([^[:alpha:]]|$)'
+last=$(printf '%s\n' "$stream" | awk -F'\t' -v re="$corr" '$1 == "U" { t = tolower($3); if (t ~ re) { n = $2; w = 0; msg = $3 } } $1 == "W" && n { w = 1 }
+	END { if (n && !w) printf "%s\t%s\n", n, msg }')
+[ -n "$last" ] || exit 0
+line=${last%%$'\t'*}
+msg=${last#*$'\t'}
+memo=$state/memo.${sid:-nosession}
+grep -qxF -- "$line" "$memo" 2> /dev/null && exit 0	# handed back once already
+printf '%s\n' "$line" >> "$memo"
+{
+	printf 'memorize-gate: he corrected you: "%s"\n' "$(printf '%s' "$msg" | cut -c1-300)"
+	echo "Before you stop, write the lesson where it will be found next time - the skill it belongs to, the repo's CLAUDE.md or the memory - and name the file in the reply. If it is not a lasting lesson (a one-off about this task), say so in one line."
+} >&2
+exit 2

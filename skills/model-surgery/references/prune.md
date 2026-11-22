@@ -5,7 +5,7 @@ every method gives all three.
 
 ## The hardware fact that decides most of it
 
-On a small machine (an older GPU without sparse tensor cores) **unstructured sparsity makes nothing faster**: zeros are still
+On this machine (Pascal GPU, no sparse tensor cores) **unstructured sparsity makes nothing faster**: zeros are still
 multiplied. The 2:4 pattern speeds up only on Ampere and newer. What really shrinks and speeds up a model here is
 **structured** pruning: whole layers, whole attention heads, narrower MLPs. Unstructured sparsity only helps a
 compressed file (and a sparse-aware CPU kernel).

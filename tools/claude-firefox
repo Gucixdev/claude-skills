@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# claude-firefox - the flatpak Firefox with its own profile and Marionette on port 2828, so the firefox-devtools MCP
+# (configured --connect-existing --marionette-port 2828) has a browser to drive. His normal browser is never touched.
+#   claude-firefox [start]   start in the background (refuses when port 2828 is already taken)
+#   claude-firefox stop      stop the one this script started (the pid in its pid file, nothing else)
+#   claude-firefox status    running or not, and whether Marionette answers on the port
+# He logs in to sites himself in this window, once; the profile keeps the session. Claude never reads passwords.
+# Environment: CLAUDE_FIREFOX_DIR (default ~/.local/share/claude-firefox), CLAUDE_FIREFOX_PORT (2828),
+# CLAUDE_FIREFOX_APP (org.mozilla.firefox), CLAUDE_FIREFOX_DEBUG_PORT (9222, the MCP needs the WebDriver BiDi endpoint too), CLAUDE_FIREFOX_HEADLESS=1 (no window, for tests; he cannot log in then). Exit: 0 fine, 1 refused or not running, 2 bad usage.
+set -u
+dir=${CLAUDE_FIREFOX_DIR:-$HOME/.local/share/claude-firefox}
+port=${CLAUDE_FIREFOX_PORT:-2828}
+app=${CLAUDE_FIREFOX_APP:-org.mozilla.firefox}
+profile=$dir/profile pidfile=$dir/pid
+
+listening() { ss -ltn 2> /dev/null | awk '{print $4}' | grep -q ":$port\$"; }
+# the flatpak wrapper and the real Firefox are different processes: match on this script'"'"'s own profile path
+pids() { ps -eo pid=,args= | awk -v p="--profile $profile " '$2 != "awk" && index($0, p) { print $1 }'; }
+running() { [ -n "$(pids)" ]; }
+
+case ${1:-start} in
+start)
+	running && { echo "claude-firefox: already running (pid $(pids | head -1))"; exit 0; }
+	listening && { echo "claude-firefox: port $port is already in use, not starting" >&2; exit 1; }
+	command -v flatpak > /dev/null || { echo "claude-firefox: flatpak not found" >&2; exit 1; }
+	mkdir -p "$profile" || exit 1
+	echo "user_pref(\"marionette.port\", $port);" > "$profile/user.js"
+	nohup flatpak run "$app" ${CLAUDE_FIREFOX_HEADLESS:+--headless} --no-remote --profile "$profile" --marionette --remote-debugging-port "${CLAUDE_FIREFOX_DEBUG_PORT:-9222}" > "$dir/log" 2>&1 &
+	echo $! > "$pidfile"
+	for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do listening && break; sleep 1; done
+	listening && echo "claude-firefox: up, Marionette on port $port (pid $(cat "$pidfile"))" \
+		|| echo "claude-firefox: started (pid $(cat "$pidfile")), port $port not answering yet; see $dir/log"
+	;;
+stop)
+	running || { echo "claude-firefox: not running"; exit 1; }
+	# shellcheck disable=SC2046
+	kill $(pids) && echo "claude-firefox: stopped"
+	;;
+status)
+	running && echo "claude-firefox: running (pid $(pids | head -1))" || echo "claude-firefox: not running"
+	listening && echo "port $port: listening" || echo "port $port: not listening"
+	running
+	;;
+*)
+	sed -n '2,/^set/p' "$0" | sed '$d;s/^# \{0,1\}//' >&2
+	exit 2
+	;;
+esac

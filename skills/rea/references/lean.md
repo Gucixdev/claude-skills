@@ -17,7 +17,7 @@ compare; never page through them.
 
 ## Dumps go to files
 
-Everything big is written under `re/`; only the decisive lines come back (`leanctx (output)`).
+Everything big is written under `re/`; only the decisive lines come back (`code (output)`).
 
 - strace: `strace -f -y -e trace=file,network -o re/trace.txt CMD`; the paths it opens, counted:
   `grep -o 'openat([^,]*, "[^"]*"' re/trace.txt | sort | uniq -c | sort -rn | head -30`. `strace -c -o re/sum.txt

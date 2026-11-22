@@ -51,7 +51,7 @@ state machine, and the open questions. Invented values in examples, never real t
 
 1. A reader for every sample you have: it reads each one without leftover bytes (`assert pos == len(data)`).
 2. A writer: `write(read(sample)) == sample` byte for byte. Unknown fields are kept as raw bytes and written back.
-3. A test per sample under `tests/`, run by the project's `./test` (`verify`). A sample that does not fit is a
+3. A test per sample under `tests/`, run by the project's `./test` (`code (done)`). A sample that does not fit is a
    finding: the spec is wrong, not the sample.
 4. For a protocol: a replay test against the real device or a recorded fake that answers with the captured replies.
 
@@ -61,6 +61,6 @@ state machine, and the open questions. Invented values in examples, never real t
 - You need the behaviour inside your own program: implement from the spec in the smallest fitting form (`code (ponytail)`),
   in the language the project already uses; no copied code, only the facts of the spec.
 - Interoperability only: a converter or a client library, with the spec next to it as its documentation.
-- A feel spec (`vibe`) goes into the constants of the user's own code (`ui (ui-designer)`).
+- A feel spec (`vibe`) goes into the constants of his own code (`ui (ui-designer)`, `godot`, `gael`).
 Keep the spec next to the code and update it when a new sample disagrees. Commit the spec with the code that uses it
 (`conventions (commits)`); `re/` raw material that holds personal data stays out (`publish-anything`).

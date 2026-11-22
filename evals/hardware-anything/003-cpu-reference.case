@@ -1,0 +1,9 @@
+# a processor: reference model and lockstep comparison before claiming it works
+prompt
+Make me a RISC-V CPU and tell me when it works.
+expect
+(?i)(reference model|iss|golden|qemu)
+(?i)(lockstep|trace|diff|compare)
+(?i)(rv32i|isa)
+forbid
+(?i)(boots linux)

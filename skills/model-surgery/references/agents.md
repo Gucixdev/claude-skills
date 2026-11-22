@@ -9,9 +9,9 @@ because the agent is only as good as the model you picked and checked ([SKILL.md
 1. **The loop**: send messages and tool definitions, run the tool calls the model returns, append the results, repeat until it answers without a tool call. Everything else is a limit or a log around that.
 2. **Hard limits**: a step limit, a token/money budget, a wall-clock timeout per tool call. An agent without them loops until the account is empty.
 3. **Few tools, sharp ones**: each with a one-line description that says when *not* to use it, typed arguments, and an error message the model can act on ("file not found, did you mean X"). Prefer one `run(command)` plus a good CLI ([cli-everything](../../anything/cli-everything/SKILL.md)) to thirty thin tools.
-4. **Show before doing**: writes, deletes, sends and spends are returned as a plan and executed only after an explicit yes (a `--yes` flag convention). Read-only tools run freely.
+4. **Show before doing**: writes, deletes, sends and spends are returned as a plan and executed only after an explicit yes (the `--yes` convention in his tools). Read-only tools run freely.
 5. **State outside the model**: the task list, notes and results in files (TSV/JSONL/SQLite); the model re-reads them each step, so a restart or a context cut loses nothing.
-6. **Keep the context small**: tool output cut to what is needed (head/tail/grep before returning), old steps summarised, no whole-file dumps ([leanctx](../../leanctx/SKILL.md)).
+6. **Keep the context small**: tool output cut to what is needed (head/tail/grep before returning), old steps summarised, no whole-file dumps ([code (output)](../../code/references/output.md)).
 7. **Verify, do not trust**: a checker the agent cannot argue with (tests, Lean, a schema, a diff of the expected file) decides "done", not the agent's own claim.
 8. **Log every tool call** (name, arguments, result size, time) to a file. Debugging an agent without the trace is guessing.
 9. **Test with a fake model** that returns canned tool calls, so the loop, the limits and the error paths are tested without a model; then a few real runs on tasks with known answers; compare models with `scripts/gen-compare`-style fixed prompts.
@@ -25,9 +25,9 @@ because the agent is only as good as the model you picked and checked ([SKILL.md
 - **Nesting**: in a monorepo put one in each package; the nearest file to the code being edited wins, and an explicit user prompt beats all of them.
 - **Claude Code reads `CLAUDE.md`, not `AGENTS.md`** (UNSURE for newer versions: test it). Keep one source of truth: write `AGENTS.md` and make `CLAUDE.md` a one-liner `@AGENTS.md` (the import syntax) or a symlink. Do not keep two diverging copies.
 
-### How to write one
+### How to write one (for his repos)
 
-1. **Commands first**, exact and runnable: build, one test, all tests, lint, run. `./run`, `./test`, `./check` ([distribute-everything](../../anything/distribute-everything/SKILL.md)). An agent that cannot run the checks cannot say "done".
+1. **Commands first**, exact and runnable: build, one test, all tests, lint, run. `./run`, `./test`, `./check` for his repos ([distribute-everything](../../anything/distribute-everything/SKILL.md)). An agent that cannot run the checks cannot say "done".
 2. **Only what an agent cannot learn by reading the code**: a convention that is not obvious, a trap that already cost time, what is generated and must not be edited, what is slow or dangerous to run (network, root, the live compositor).
 3. **Rules as "never"/"always" with the reason in half a line.** A rule without a reason gets argued with or ignored.
 4. Boundaries: what needs asking first (push, delete, spend money, network), where secrets live and that they are never printed ([rules](../../rules/SKILL.md)).
@@ -58,9 +58,9 @@ Decide by what you need, not by popularity. Many tasks need none: a loop that ca
 - **MCP** (Model Context Protocol): how an agent reaches tools and data. Here it is the last resort after CLI and REST ([mcp](../../anything/cli-everything/references/mcp.md)).
 - **A2A** (agent-to-agent, started at Google, now under the Linux Foundation, UNSURE): how separate agents talk to each other. You need it only when agents from different vendors must cooperate.
 
-### Picking
+### Picking (his constraints)
 
 - Free and local first: smolagents or a plain loop on a local llama-server; paid SDKs only when a provider is already chosen.
-- Python and TypeScript are fine; the repo's own state lives in files (TSV/JSONL/SQLite), see `cli-everything` shapes.
-- Every agent gets the same discipline as other code: a test with a fake model that returns canned tool calls, a step limit, a budget limit, tool calls logged, writes shown before they happen.
+- No Go toolchain, Python and TypeScript fine; the repo's own state lives in files (TSV/JSONL/SQLite), see `cli-everything` shapes.
+- Every agent he builds gets the same discipline as other code: a test with a fake model that returns canned tool calls, a step limit, a budget limit, tool calls logged, writes shown before they happen.
 - Before adopting one: read its current README, pin the version, run its smallest example, and note in the repo why it was chosen (the field moves monthly, the note is how the choice gets revisited).

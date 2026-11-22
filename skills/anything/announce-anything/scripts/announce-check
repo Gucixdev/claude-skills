@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# announce-check - the gate before any post about a GitHub project: one blunder in one public repo is what a
+# reader finds after clicking through from the post. Reads GitHub, changes nothing, posts nothing.
+#
+# usage: announce-check [-o OWNER] [-p POSTFILE] [REPO...]
+#   -o OWNER    the GitHub account to inspect (default: the account gh is logged in as)
+#   -p POSTFILE the text of a post (title on the first line): checked for identity, marketing words, HN title rules
+#   REPO...     only these repos (names); default: every public, non-fork, non-archived repo of the owner
+# Each repo is cloned (or fetched) from GitHub into ${XDG_CACHE_HOME:-~/.cache}/announce-check/, so what is checked
+# is what the public sees, not the working copy. Per repo: publish-check on the tree (secrets, identity, paths,
+# generated-sounding comments), the author and committer identities of the last 200 commits, token shapes in their
+# diffs (gitleaks over the whole history when installed), a README, a LICENSE, a description.
+# Exit 0 clean, 1 findings, 2 bad usage. Needs gh (logged in), git; publish-check is found next to
+# publish-anything or on PATH.
+
+case ${1:-} in -h | --help) awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;; esac
+
+owner="" post="" repos=()
+while [ $# -gt 0 ]; do
+	case $1 in
+		-o) [ $# -ge 2 ] || { echo "announce-check: -o needs an owner" >&2; exit 2; }; owner=$2; shift ;;
+		-p) [ $# -ge 2 ] || { echo "announce-check: -p needs a file" >&2; exit 2; }; post=$2; shift ;;
+		-*) echo "announce-check: unknown option $1 (see --help)" >&2; exit 2 ;;
+		*) repos+=("$1") ;;
+	esac
+	shift
+done
+command -v gh > /dev/null && command -v git > /dev/null || { echo "announce-check: needs gh and git" >&2; exit 2; }
+here=$(dirname "$(readlink -f "$0")")
+pc=$here/../../publish-anything/scripts/publish-check
+[ -x "$pc" ] || pc=$(command -v publish-check) || { echo "announce-check: publish-check not found" >&2; exit 2; }
+owner=${owner:-$(gh api user --jq .login 2> /dev/null)}
+[ -n "$owner" ] || { echo "announce-check: no owner (gh not logged in? use -o)" >&2; exit 2; }
+
+problems=0
+say() { printf '  %s\n' "$*"; problems=$((problems + 1)); }
+
+# login, home, git name and e-mail of this machine, one per line; the public identity (owner name, noreply address) is meant to show
+identity_words() {
+	{
+		id -un
+		printf '%s\n' "$HOME"
+		git config --get user.email
+		git config --get user.name
+		git config -f "$HOME/.gitconfig.local" --get user.email 2> /dev/null
+	} | grep -viE "noreply|^${owner:-@}\$"
+}
+
+if [ -n "$post" ]; then
+	echo "post: $post"
+	[ -f "$post" ] || { echo "announce-check: no such file: $post" >&2; exit 2; }
+	title=$(sed -n 1p "$post")
+	[ "${#title}" -le 80 ] || say "title is ${#title} characters; Hacker News cuts at 80"
+	case $title in "Show HN"*) case $title in "Show HN: "*) ;; *) say "write it 'Show HN: Name - what it does'" ;; esac ;; esac
+	while IFS= read -r w; do
+		[ "${#w}" -ge 3 ] && grep -nF -- "$w" "$post" | sed 's/^/  identity: /' | { grep . && problems=$((problems + 1)); }
+	done < <(identity_words | sort -u)
+	grep -niE 'revolutionary|game-?changer|blazing|seamless|robust|leverage|delve|excited to (announce|share)|thrilled|production-ready|cutting-edge|next-gen|supercharge|upvote|please star' "$post" |
+		sed 's/^/  marketing words: /' | { grep . && problems=$((problems + 1)); }
+	grep -nP '[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]' "$post" 2> /dev/null | sed 's/^/  emoji: /' | { grep . && problems=$((problems + 1)); }
+	grep -qE 'https?://' "$post" || say "no link in the post"
+	grep -nE 'https?://[^ )]+' -o "$post" | cut -d: -f2- | sort -u | while IFS= read -r u; do
+		code=$(curl -s -o /dev/null -L -m 15 -w '%{http_code}' "$u" 2> /dev/null)
+		case $code in 2*) ;; *) echo "  link $u answers $code" ;; esac
+	done | { grep . && problems=$((problems + 1)); }
+fi
+
+if [ ${#repos[@]} -eq 0 ]; then
+	mapfile -t repos < <(gh repo list "$owner" --visibility public --no-archived --source --limit 200 --json name --jq '.[].name')
+fi
+[ ${#repos[@]} -gt 0 ] || { echo "announce-check: no public repos for $owner" >&2; [ -n "$post" ] && { echo "post checked; problems: $problems"; [ "$problems" -eq 0 ]; exit; }; exit 2; }
+
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/announce-check
+mkdir -p "$cache" || exit 2
+echo "owner: $owner, ${#repos[@]} public repos"
+for r in "${repos[@]}"; do
+	echo "== $r"
+	d=$cache/$owner-$r
+	if [ -d "$d/.git" ]; then git -C "$d" fetch -q --depth 200 origin 2> /dev/null && git -C "$d" reset -q --hard FETCH_HEAD 2> /dev/null
+	else git clone -q --depth 200 "https://github.com/$owner/$r.git" "$d" 2> /dev/null; fi
+	[ -d "$d/.git" ] || { say "cannot clone $owner/$r"; continue; }
+	meta=$(gh repo view "$owner/$r" --json description,licenseInfo,homepageUrl --jq '[.description // "", .licenseInfo.key // ""] | @tsv' 2> /dev/null)
+	[ -n "$(printf '%s' "$meta" | cut -f1)" ] || say "no description on GitHub"
+	[ -n "$(ls "$d" | grep -iE '^(licen[sc]e|copying)')" ] || say "no LICENSE file"
+	[ -n "$(ls "$d" | grep -iE '^readme')" ] || say "no README"
+	# publish-check also reports the owner name (the git user.name here is the public one): that is meant to show
+	# vendored code (third_party, vendor, deps, node_modules) is somebody else's text and is not judged
+	out=$("$pc" "$d" 2>&1 | grep -viE "^ *identity +.*${owner}" | grep -vE '^ *[a-z]+ +([^ ]*/)?(third_party|vendor|deps|node_modules)/' | grep -vE '^ *(== [a-z]+ ==|)$')
+	if printf '%s\n' "$out" | grep -qE '^ *(secret|identity|path|filler)'; then
+		say "publish-check:"
+		printf '%s\n' "$out" | grep -E '^ *(secret|identity|path|filler)' | sed 's/^ */    /' | head -20
+	fi
+	own=$(identity_words | sort -u)
+	git -C "$d" log -200 --format='%an <%ae>%n%cn <%ce>' | sort -u | while IFS= read -r who; do
+		case $who in *noreply.github.com*|*"GitHub <"*) continue ;; esac
+		printf '%s\n' "$own" | while IFS= read -r w; do [ "${#w}" -ge 3 ] && case $who in *"$w"*) echo "  commit identity: $who"; break ;; esac; done
+	done | sort -u | { grep . && problems=$((problems + 1)); }
+	if command -v gitleaks > /dev/null; then
+		gitleaks detect -s "$d" --no-banner -q > /dev/null 2>&1 || say "gitleaks found something in the history (gitleaks detect -s $d)"
+	else
+		git -C "$d" log -200 -p 2> /dev/null | grep -E '^\+.*(ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9]{32,}|AKIA[0-9A-Z]{16}|xox[bap]-[A-Za-z0-9-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY)' |
+			cut -c1-12 | sed 's/^/  token shape in history: /' | { grep . && problems=$((problems + 1)); }
+	fi
+done
+
+echo
+if [ "$problems" -eq 0 ]; then echo "clean: nothing found in ${#repos[@]} repos"; exit 0; fi
+echo "$problems things to fix before posting"
+exit 1

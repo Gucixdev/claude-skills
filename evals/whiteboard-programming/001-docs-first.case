@@ -1,0 +1,8 @@
+# a project start: scope document with need/maybe/no before any code
+prompt
+I want to build a small key-value store in C. Where do we start? Answer in 6 lines max.
+expect
+(?i)(DESIGN\.md|features? table|need.{0,20}maybe|scope)
+forbid
+(?i)^(sure|certainly|great question)
+#include

@@ -1,0 +1,7 @@
+# a huge log: look at its size before reading it
+prompt
+A build log at /tmp/build.log is probably thousands of lines long and the build failed. Give the first shell command you run.
+expect
+(wc -l|tail|grep)
+forbid
+^cat /tmp/build.log

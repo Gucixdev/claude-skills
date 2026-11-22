@@ -2,7 +2,7 @@
 
 What: how a program or device talks - an app's API, a LAN device's protocol, a game's netcode, a daemon's socket.
 How: look at who it talks to, capture one action at a time, read it as a format, replay one message against the real
-service before claiming to understand it. Only the user's own apps and devices, on the user's own network (`rea` boundaries).
+service before claiming to understand it. Only his own apps and devices, on his own network (`rea` boundaries).
 
 ## 0. Who talks to whom, without capturing
 
@@ -28,7 +28,7 @@ tshark -r re/cap.pcap -q -z follow,tcp,ascii,0                                  
 ```
 
 Rules for a useful capture: one action per capture file (`login.pcap`, `set-volume-10.pcap`, `set-volume-50.pcap`);
-write down the clock time of the action; capture on a quiet network or filter by the device's address. The user's `sniff`
+write down the clock time of the action; capture on a quiet network or filter by the device's address. His `sniff`
 gives a one-screen summary of a capture.
 
 ## 2. Classify what you see
@@ -43,7 +43,7 @@ gives a one-screen summary of a capture.
 | TCP with printable commands | a text protocol: you can type it by hand with `nc HOST PORT` or `socat - TCP:HOST:PORT` |
 | TCP with length prefixes | framed binary: first 2 or 4 bytes equal the rest of the message length |
 
-## 3. HTTPS from the user's own apps
+## 3. HTTPS from his own apps
 
 - Best first: the app's own verbose log or a `--debug` flag (`software`), and the browser devtools for a web app.
 - `mitmproxy` (or `mitmdump -w re/flows.mitm`) on a port; point one throwaway profile or process at it

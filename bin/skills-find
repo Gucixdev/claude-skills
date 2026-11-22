@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""skills-find - the few chunks of the skills that answer a task, instead of whole files (for a small-context model).
+
+Splits every SKILL.md and references/*.md into chunks (a heading section, cut at paragraph breaks to about 700
+characters), ranks them with BM25 against the query (plain words, lower-cased, no embedding server needed) and prints
+the top ones with their path:line. A heading line counts triple in a chunk. Output is capped by total bytes so the
+answer always fits the model's window.
+
+usage: skills-find [-k N] [-b BYTES] [-s NAME] QUERY...
+  -k N      chunks to print (default 4)
+  -b BYTES  stop printing when the output reaches this many bytes (default 3000)
+  -s NAME   only this skill (repeatable)
+Prints "path:line  score" then the chunk, a blank line between chunks. Exit 0 with hits, 1 without, 2 bad usage.
+SKILLS_DIR overrides the skills/ folder next to bin/. Example: skills-find -k 3 compress a prose file
+"""
+import math, os, re, sys
+
+def tok(s):
+    return re.findall(r"[a-z0-9_]{2,}", s.lower())
+
+def load_chunks(root, only=()):
+    """[(rel path, line, text, tokens, heading)] for every skill markdown file under root."""
+    only = set(only)
+    chunks = []
+    for dp, dn, fn in os.walk(root):
+        dn[:] = sorted(d for d in dn if d not in ("trash", "synced", "tests", "scripts"))
+        for f in sorted(fn):
+            if not f.endswith(".md"): continue
+            p = os.path.join(dp, f)
+            rel = os.path.relpath(p, os.path.dirname(root))
+            skill = os.path.relpath(p, root).split(os.sep)
+            if only:
+                parts = set(skill[:-1])
+                if not (parts & only): continue
+            try: lines = open(p, encoding="utf-8").read().split("\n")
+            except OSError: continue
+            if lines and lines[0] == "---":  # header is not content
+                try: end = lines.index("---", 1) + 1
+                except ValueError: end = 0
+            else: end = 0
+            buf, start, head = [], end + 1, ""
+            def flush():
+                nonlocal buf, start
+                text = "\n".join(buf).strip("\n")
+                if text.strip():
+                    t = tok(text) + 2 * tok(head)
+                    chunks.append((rel, start, text, t, head))
+                buf = []
+            for n in range(end, len(lines)):
+                l = lines[n]
+                if l.startswith("#"):
+                    flush(); head = l; start = n + 1; buf = [l]; continue
+                if not buf: start = n + 1
+                buf.append(l)
+                if l.strip() == "" and sum(len(x) + 1 for x in buf) > 700:
+                    flush()
+            flush()
+    return chunks
+
+def bm25(chunks, q):
+    """BM25 score of every chunk (index-aligned) for the query tokens q."""
+    N = len(chunks); avg = sum(len(c[3]) for c in chunks) / N
+    df = {}
+    for c in chunks:
+        for w in set(c[3]): df[w] = df.get(w, 0) + 1
+    k1, b = 1.5, 0.75
+    out = []
+    for c in chunks:
+        tf = {}
+        for w in c[3]: tf[w] = tf.get(w, 0) + 1
+        s = 0.0
+        for w in set(q):
+            if w not in tf: continue
+            idf = math.log(1 + (N - df[w] + 0.5) / (df[w] + 0.5))
+            s += idf * tf[w] * (k1 + 1) / (tf[w] + k1 * (1 - b + b * len(c[3]) / avg))
+        out.append(s)
+    return out
+
+def main(argv):
+    k, cap, only, words = 4, 3000, set(), []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-h", "--help"):
+            print(__doc__.strip()); return 0
+        if a in ("-k", "-b", "-s"):
+            if i + 1 >= len(argv): print(f"skills-find: {a} needs a value", file=sys.stderr); return 2
+            v = argv[i + 1]; i += 2
+            if a == "-s": only.add(v); continue
+            if not v.isdigit() or int(v) < 1: print(f"skills-find: {a} wants a positive number", file=sys.stderr); return 2
+            if a == "-k": k = int(v)
+            else: cap = int(v)
+            continue
+        if a.startswith("-") and len(a) > 1 and not words:
+            print(f"skills-find: unknown option {a} (see --help)", file=sys.stderr); return 2
+        words.append(a); i += 1
+    if not words: print("skills-find: need a QUERY (see --help)", file=sys.stderr); return 2
+
+    root = os.environ.get("SKILLS_DIR") or os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "skills")
+    root = os.path.realpath(root)
+    if not os.path.isdir(root): print(f"skills-find: no folder {root}", file=sys.stderr); return 2
+
+    chunks = load_chunks(root, only)
+    if not chunks: print("skills-find: no skill text found", file=sys.stderr); return 2
+
+    q = tok(" ".join(words))
+    if not q: print("skills-find: the query has no words", file=sys.stderr); return 2
+    scored = [(v, c) for v, c in zip(bm25(chunks, q), chunks) if v > 0]
+    scored.sort(key=lambda x: -x[0])
+    if not scored: return 1
+    used = 0
+    for s, c in scored[:k]:
+        out = f"{c[0]}:{c[1]}  {s:.2f}\n{c[2]}\n\n"
+        if used and used + len(out.encode()) > cap: break
+        sys.stdout.write(out); used += len(out.encode())
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

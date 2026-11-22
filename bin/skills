@@ -8,6 +8,12 @@
 #   skills req NAME...          what NAME needs, and what every skill it requires needs, checked on this machine
 #   skills check [NAME...]      validate the headers (claude.ai's rules plus this repo's standard) and the index
 #   skills index                rewrite the generated map in skills/claude/SKILL.md
+#   skills eval [options] [NAME...]   run evals/NAME/*.case with and without the skill (see skills-eval --help)
+#   skills find [-k N] [-b BYTES] [-s NAME] QUERY...   the few best chunks of all skill text (BM25), with path:line
+#   skills retrieve [-k N] [-m BYTES] [-s NAME] [--lexical] TASK...   top chunks by meaning plus words (cached embeddings), capped
+#   skills export [options] [NAME...]   flat size-capped cards plus an AGENTS.md router for small models (see skills-export --help)
+#   skills factory queue|list|next|digest|done ...   every session into a skill: digests of finished sessions, waiting
+#                               for the next one to turn them into skills (see skills-factory --help)
 #   skills install [-n] [DIR]   link every skill into DIR (default ~/.claude/skills); whatever was in the way goes to
 #                               the trash, never deleted; -n prints what it would do
 #
@@ -327,7 +333,12 @@ req) cmd_req "$@" ;;
 check) cmd_check "$@" ;;
 index) cmd_index ;;
 install) cmd_install "$@" ;;
+find) exec "$(dirname "$(readlink -f "$0")")/skills-find" "$@" ;;
+retrieve) exec "$(dirname "$(readlink -f "$0")")/skills-retrieve" "$@" ;;
+export) exec "$(dirname "$(readlink -f "$0")")/skills-export" "$@" ;;
+eval) exec "$(dirname "$(readlink -f "$0")")/skills-eval" "$@" ;;
+factory) exec "$(dirname "$(readlink -f "$0")")/skills-factory" "$@" ;;
 -h | --help | help) usage ;;
 '') usage >&2; exit 2 ;;
-*) die "unknown command $cmd (ls, tags, path, req, check, index, install)" ;;
+*) die "unknown command $cmd (ls, tags, path, req, check, index, eval, export, find, retrieve, install)" ;;
 esac

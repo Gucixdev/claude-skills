@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+# palette - colours that go together: accents from a seed, WCAG contrast checks, full light and dark accent sets.
+#
+#   palette gen HEX [--scheme S] [--n N] [--json]   N accents from the seed, one "NAME #RRGGBB" per line
+#       S = analogous | complementary | triadic | split | tetradic | mono   (default analogous)
+#       N = 1..64, default = the scheme's natural size (3, 2, 3, 3, 4, 5); accent-1 is the seed itself
+#   palette check FG BG [--json]                    WCAG 2.x contrast ratio, AA/AAA for normal and large text
+#   palette set HEX [--json]                        bg surface border text muted accent accent-hover success
+#                                                   warning danger, for light and dark mode, as CSS custom
+#                                                   properties (:root plus a prefers-color-scheme: dark block)
+#
+# HEX is #RGB or #RRGGBB, with or without the #. Output hex is uppercase #RRGGBB.
+# Colours are derived in OKLCH (Bjorn Ottosson's OKLab, as in CSS Color 4): hue is rotated, lightness and chroma
+# stay in a usable band, and a colour outside sRGB loses chroma (lightness and hue kept) until it fits - nothing
+# is clipped per channel. A grey seed (chroma ~ 0) has no hue; hue 0 is used and chroma gets a small floor.
+# In "set" every foreground (text, muted, accent, accent-hover, success, warning, danger) is checked against
+# bg and surface in both modes; lightness moves in steps of 0.005 until the pair reaches AA 4.5:1, measured on
+# the final rounded hex. border is not text and is not checked. A pair that cannot get there is reported on
+# stderr and in the CSS header comment.
+# Same input, same output: no randomness, no clock.
+#
+# Exit codes: 0 ok; 1 contrast below AA (check) or set could not reach AA for some pair; 2 bad usage or input.
+# Example: palette set '#3366ff' | grep -- '--accent'
+import json
+import math
+import re
+import sys
+
+AA_NORMAL, AAA_NORMAL, AA_LARGE, AAA_LARGE = 4.5, 7.0, 3.0, 4.5
+STEP = 0.005
+
+
+class Usage(Exception):
+    pass
+
+
+# --- sRGB <-> linear <-> OKLab <-> OKLCH (Ottosson's matrices) ---------------------------------------------
+
+def srgb_to_lin(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def lin_to_srgb(c):
+    return 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
+
+
+def lin_to_oklab(r, g, b):
+    l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b
+    m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b
+    s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
+    l, m, s = math.cbrt(l), math.cbrt(m), math.cbrt(s)
+    return (0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+            1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+            0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s)
+
+
+def oklab_to_lin(L, a, b):
+    l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3
+    m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3
+    s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3
+    return (4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+            -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+            -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s)
+
+
+def oklab_to_oklch(L, a, b):
+    c = math.hypot(a, b)
+    h = math.degrees(math.atan2(b, a)) % 360 if c > 1e-4 else 0.0
+    return L, c, h
+
+
+def oklch_to_oklab(L, c, h):
+    return L, c * math.cos(math.radians(h)), c * math.sin(math.radians(h))
+
+
+def rgb_to_oklch(rgb):
+    return oklab_to_oklch(*lin_to_oklab(*(srgb_to_lin(v / 255) for v in rgb)))
+
+
+def oklch_to_lin(L, c, h):
+    return oklab_to_lin(*oklch_to_oklab(L, c, h))
+
+
+def in_gamut(lin, eps=1e-9):
+    return all(-eps <= v <= 1 + eps for v in lin)
+
+
+def gamut_clip(L, c, h):
+    """Return (L, c', h) with c' <= c the largest chroma at this lightness and hue that fits sRGB."""
+    L = min(1.0, max(0.0, L))
+    if in_gamut(oklch_to_lin(L, c, h)):
+        return L, c, h
+    lo, hi = 0.0, c
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if in_gamut(oklch_to_lin(L, mid, h)):
+            lo = mid
+        else:
+            hi = mid
+    return L, lo, h
+
+
+def oklch_to_rgb(L, c, h):
+    L, c, h = gamut_clip(L, c, h)
+    lin = oklch_to_lin(L, c, h)
+    return tuple(min(255, max(0, round(lin_to_srgb(min(1.0, max(0.0, v))) * 255))) for v in lin)
+
+
+# --- hex, WCAG ---------------------------------------------------------------------------------------------
+
+def parse_hex(s):
+    m = re.fullmatch(r"#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})", s)
+    if not m:
+        raise Usage(f"invalid colour '{s}' (expected #RGB or #RRGGBB)")
+    h = m.group(1)
+    if len(h) == 3:
+        h = "".join(ch * 2 for ch in h)
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def to_hex(rgb):
+    return "#%02X%02X%02X" % rgb
+
+
+def luminance(rgb):
+    r, g, b = (srgb_to_lin(v / 255) for v in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(a, b):
+    la, lb = luminance(a), luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def ratio_text(r):
+    return "%.2f" % (math.floor(r * 100 + 1e-9) / 100)  # truncated, never rounded up across a threshold
+
+
+# --- gen ---------------------------------------------------------------------------------------------------
+
+NATURAL = {"analogous": 3, "complementary": 2, "triadic": 3, "split": 3, "tetradic": 4, "mono": 5}
+OFFSETS = {"complementary": [0, 180], "triadic": [0, 120, 240], "split": [0, 150, 210],
+           "tetradic": [0, 90, 180, 270]}
+MAX_N = 64
+
+
+def hue_offsets(scheme, n):
+    if scheme == "analogous":
+        out = [0]
+        k = 1
+        while len(out) < n:
+            out += [30 * k, -30 * k]
+            k += 1
+        return out[:n]
+    base = OFFSETS[scheme]
+    return [base[i % len(base)] for i in range(n)]
+
+
+def gen(seed, scheme, n):
+    L0, c0, h0 = rgb_to_oklch(seed)
+    if scheme == "mono":
+        # n lightness steps over 0.30..0.92; the step nearest the seed's lightness is the seed itself
+        steps = [0.61] if n == 1 else [0.30 + 0.62 * i / (n - 1) for i in range(n)]
+        near = min(range(n), key=lambda i: abs(steps[i] - L0))
+        return [seed if i == near else oklch_to_rgb(steps[i], c0, h0) for i in range(n)]
+    c = min(max(c0, 0.06), 0.20)
+    offs = hue_offsets(scheme, n)
+    size = len(OFFSETS[scheme]) if scheme in OFFSETS else n
+    out = [seed]
+    for i in range(1, n):
+        rnd = i // size  # past the scheme's own size the hues repeat, lightness alternates around the seed
+        shift = 0.07 * ((rnd + 1) // 2) * (1 if rnd % 2 else -1)
+        out.append(oklch_to_rgb(min(0.85, max(0.40, L0 + shift)), c, (h0 + offs[i]) % 360))
+    return out
+
+
+# --- set ---------------------------------------------------------------------------------------------------
+
+FOREGROUNDS = ["text", "muted", "accent", "accent-hover", "success", "warning", "danger"]
+ORDER = ["bg", "surface", "border"] + FOREGROUNDS
+SEMANTIC = {"success": 145, "warning": 85, "danger": 25}
+
+
+def fit(L, c, h, bgs, direction, start_shift=0.0):
+    """Move lightness from L (+ start_shift) in direction (+1 lighter, -1 darker) until every bg reaches AA.
+    Returns (rgb, ok)."""
+    L = min(1.0, max(0.0, L + start_shift * direction))
+    while True:
+        rgb = oklch_to_rgb(L, c, h)
+        if all(contrast(rgb, bg) >= AA_NORMAL for bg in bgs):
+            return rgb, True
+        if (direction < 0 and L <= 0) or (direction > 0 and L >= 1):
+            return rgb, False
+        L = min(1.0, max(0.0, L + STEP * direction))
+
+
+def build_mode(seed_lch, dark):
+    L0, c0, h0 = seed_lch
+    tint = min(c0, 0.03)
+    if dark:
+        bg = oklch_to_rgb(0.17, tint * 0.4, h0)
+        surface = oklch_to_rgb(0.21, tint * 0.5, h0)
+        border = oklch_to_rgb(0.32, tint * 0.6, h0)
+        d = 1
+    else:
+        bg = oklch_to_rgb(0.985, tint * 0.15, h0)
+        surface = oklch_to_rgb(0.955, tint * 0.25, h0)
+        border = oklch_to_rgb(0.88, tint * 0.4, h0)
+        d = -1
+    bgs = [bg, surface]
+    cols = {"bg": bg, "surface": surface, "border": border}
+    cols["text"], _ = fit(0.94 if dark else 0.22, tint * 0.5, h0, bgs, d)
+    cols["muted"], _ = fit(0.72 if dark else 0.50, tint * 0.5, h0, bgs, d)
+    ca = min(c0, 0.25)
+    cols["accent"], _ = fit(L0, ca, h0, bgs, d)
+    cols["accent-hover"], _ = fit(rgb_to_oklch(cols["accent"])[0], ca, h0, bgs, d, 0.06)
+    for name, hue in SEMANTIC.items():
+        cols[name], _ = fit(0.75 if dark else 0.55, 0.16, hue, bgs, d)
+    return cols
+
+
+def build_set(seed):
+    lch = rgb_to_oklch(seed)
+    modes, fails = {}, []
+    for mode in ("light", "dark"):
+        cols = build_mode(lch, mode == "dark")
+        modes[mode] = {k: to_hex(cols[k]) for k in ORDER}
+        for fg in FOREGROUNDS:
+            for bg in ("bg", "surface"):
+                r = contrast(cols[fg], cols[bg])
+                if r < AA_NORMAL:
+                    fails.append(f"{mode}: {fg} on {bg} = {ratio_text(r)}:1")
+    return modes, fails
+
+
+def min_ratio(modes):
+    return min(contrast(parse_hex(m[fg]), parse_hex(m[bg]))
+               for m in modes.values() for fg in FOREGROUNDS for bg in ("bg", "surface"))
+
+
+def css(seed, modes, fails):
+    lines = [f"/* palette set {to_hex(seed)}: every text pair AA >= 4.5:1, lowest {ratio_text(min_ratio(modes))}:1"
+             + (f", FAILED: {'; '.join(fails)}" if fails else "") + " */"]
+    lines.append(":root {")
+    lines += [f"  --{k}: {modes['light'][k]};" for k in ORDER]
+    lines.append("}")
+    lines.append("@media (prefers-color-scheme: dark) {")
+    lines.append("  :root {")
+    lines += [f"    --{k}: {modes['dark'][k]};" for k in ORDER]
+    lines.append("  }")
+    lines.append("}")
+    return "\n".join(lines)
+
+
+# --- commands ----------------------------------------------------------------------------------------------
+
+def take_opts(args, spec):
+    """spec maps option -> takes_value. Returns (positionals, {option: value-or-True})."""
+    pos, opts, i = [], {}, 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--") and len(a) > 2:
+            name, eq, val = a.partition("=")
+            if name not in spec:
+                raise Usage(f"unknown option '{name}'")
+            if spec[name]:
+                if not eq:
+                    i += 1
+                    if i >= len(args):
+                        raise Usage(f"option '{name}' needs a value")
+                    val = args[i]
+                opts[name] = val
+            else:
+                if eq:
+                    raise Usage(f"option '{name}' takes no value")
+                opts[name] = True
+        else:
+            pos.append(a)
+        i += 1
+    return pos, opts
+
+
+def cmd_gen(args):
+    pos, o = take_opts(args, {"--scheme": True, "--n": True, "--json": False})
+    if len(pos) != 1:
+        raise Usage("gen needs exactly one HEX seed")
+    seed = parse_hex(pos[0])
+    scheme = o.get("--scheme", "analogous")
+    if scheme not in NATURAL:
+        raise Usage(f"unknown scheme '{scheme}' (analogous, complementary, triadic, split, tetradic, mono)")
+    n = NATURAL[scheme]
+    if "--n" in o:
+        if not re.fullmatch(r"[0-9]+", o["--n"]) or not 1 <= int(o["--n"]) <= MAX_N:
+            raise Usage(f"--n must be an integer 1..{MAX_N}, got '{o['--n']}'")
+        n = int(o["--n"])
+    colours = [(f"accent-{i + 1}", to_hex(c)) for i, c in enumerate(gen(seed, scheme, n))]
+    if "--json" in o:
+        print(json.dumps({"seed": to_hex(seed), "scheme": scheme,
+                          "colors": [{"name": a, "hex": b} for a, b in colours]}, indent=2))
+    else:
+        for name, hx in colours:
+            print(f"{name} {hx}")
+    return 0
+
+
+def cmd_check(args):
+    pos, o = take_opts(args, {"--json": False})
+    if len(pos) != 2:
+        raise Usage("check needs FG and BG")
+    fg, bg = parse_hex(pos[0]), parse_hex(pos[1])
+    r = contrast(fg, bg)
+    res = {"normal": {"AA": r >= AA_NORMAL, "AAA": r >= AAA_NORMAL},
+           "large": {"AA": r >= AA_LARGE, "AAA": r >= AAA_LARGE}}
+    if "--json" in o:
+        print(json.dumps({"fg": to_hex(fg), "bg": to_hex(bg), "ratio": float(ratio_text(r)), **res}, indent=2))
+    else:
+        yn = lambda v: "pass" if v else "FAIL"
+        print(f"{to_hex(fg)} on {to_hex(bg)}  contrast {ratio_text(r)}:1")
+        for size in ("normal", "large"):
+            print(f"{size} text  AA {yn(res[size]['AA'])}  AAA {yn(res[size]['AAA'])}")
+    return 0 if r >= AA_NORMAL else 1
+
+
+def cmd_set(args):
+    pos, o = take_opts(args, {"--json": False})
+    if len(pos) != 1:
+        raise Usage("set needs exactly one HEX seed")
+    seed = parse_hex(pos[0])
+    modes, fails = build_set(seed)
+    if "--json" in o:
+        print(json.dumps({"seed": to_hex(seed), "aa_ok": not fails, "failed": fails, **modes}, indent=2))
+    else:
+        print(css(seed, modes, fails))
+    for f in fails:
+        print(f"palette: could not reach AA - {f}", file=sys.stderr)
+    return 1 if fails else 0
+
+
+def usage_text():
+    out = []
+    with open(__file__, encoding="utf-8") as fh:
+        for line in fh.read().splitlines()[1:]:
+            if not line.startswith("#"):
+                break
+            out.append(line[2:] if line.startswith("# ") else line[1:])
+    return "\n".join(out)
+
+
+def main(argv):
+    try:
+        if not argv or argv[0] in ("-h", "--help", "help"):
+            print(usage_text())
+            return 0 if argv else 2
+        cmds = {"gen": cmd_gen, "check": cmd_check, "set": cmd_set}
+        if argv[0] not in cmds:
+            raise Usage(f"unknown command '{argv[0]}' (gen, check, set)")
+        if any(a in ("-h", "--help") for a in argv[1:]):
+            print(usage_text())
+            return 0
+        return cmds[argv[0]](argv[1:])
+    except Usage as e:
+        print(f"palette: {e}", file=sys.stderr)
+        print("try: palette --help", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

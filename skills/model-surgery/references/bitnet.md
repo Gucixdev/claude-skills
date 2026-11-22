@@ -20,7 +20,7 @@ of an ordinary model to ternary destroys it. Claims marked UNSURE are from memor
 | train from scratch, ternary from step 0 | pretraining budget (Microsoft's BitNet-b1.58-2B-4T: 4T tokens, released) | best quality for the size |
 | convert an existing model | many billions of tokens (UNSURE exactly: the converted Llama-3 8B in BitNet's supported list is named `HF1BitLLM/Llama3-8B-1.58-100B-tokens`, i.e. 100B tokens) | a gap to the original that shrinks with more tokens |
 
-**Not possible on a small machine** (4 GB, no bf16): conversion training needs the full latent weights plus
+**Not possible on this machine** (4 GB, Pascal, no bf16): conversion training needs the full latent weights plus
 optimiser state. Rent a GPU with 24+ GB for a 1-2B model, or just *run* the released ternary model (below).
 
 ## Convert an existing model (rented GPU)
@@ -32,7 +32,7 @@ optimiser state. Rent a GPU with 24+ GB for a 1-2B model, or just *run* the rele
 5. Watch the held-out loss against the original's. Stop when it flattens; the gap that remains is the cost of the conversion.
 6. Export: store the ternary weights packed (2 bits each, plus one scale per tensor) in the format the runtime wants.
 
-## Run a released ternary model (CPU)
+## Run a released ternary model (this machine, CPU)
 
 1. `git clone --recursive https://github.com/microsoft/BitNet.git`, `pip install -r requirements.txt` (README); the project is `bitnet.cpp`, built on llama.cpp, with ternary kernels.
 2. `huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf --local-dir models/BitNet-b1.58-2B-4T`, then `python setup_env.py -md models/BitNet-b1.58-2B-4T -q i2_s` (quant types: `i2_s`, `tl1`). The 2.4B model was trained on 4T tokens.

@@ -1,10 +1,10 @@
 ---
 name: ship-anything
-description: "Release and put it in front of people - the smallest shippable version, the release checklist (tests, identity scan, semver from Conventional Commits, changelog, annotated tag, gh release with files, download verified on a clean machine), compatibility across releases, rollback, where to publish (GitHub, AUR, Flathub, Steam), legal basics, and ways it can earn. Use when the user says release, publish, ship, sell or show, or when a project reaches \"it works\". Packaging included: Package for others - one static binary per target (C with musl, Go, Rust), single-file bash tools with install, man page and completions, reproducible tarballs with SHA256SUMS, distro packages (AUR PKGBUILD, Gentoo ebuild, Flatpak, AppImage, deb), Godot exports, licenses inside, and an install test on a clean container. Use when preparing anything for someone else to install."
+description: Release and package for others - smallest shippable version, release checklist (tests, identity scan, semver, changelog, tag, gh release, clean-machine check), rollback, where to publish (GitHub, AUR, Flathub, Steam), static binaries, tarballs with SHA256SUMS, AUR/Flatpak/AppImage/deb. Use for release, publish, ship, sell, show, pack, or when a project reaches it works.
 metadata:
   priority: "2"
   tags: "#ship #release #publishing #business #dev #pack #build #linux"
-  requires: "skill:rules skill:conventions ?cmd:gh skill:code skill:verify ?cmd:podman|docker ?cmd:flatpak-builder ?cmd:makepkg"
+  requires: "skill:rules skill:conventions ?cmd:gh skill:code skill:code ?cmd:podman|docker ?cmd:flatpak-builder ?cmd:makepkg"
 ---
 
 # ship-anything
@@ -21,10 +21,10 @@ left out goes in the README's status section, not into the release.
 3. Version from the commits since the last tag: any `!`/`BREAKING CHANGE` - major, any `feat` - minor, else patch
    (before 1.0: breaking - minor).
 4. Changelog for that range (`conventions (doc)`).
-5. Annotated tag: `git tag -a vX.Y.Z -m 'vX.Y.Z'`, pushed with the user's go-ahead (`rules (discipline)`).
+5. Annotated tag: `git tag -a vX.Y.Z -m 'vX.Y.Z'`, pushed with his go-ahead (`rules (discipline)`).
 6. `gh release create vX.Y.Z dist/* --title vX.Y.Z --notes-file NOTES.md`.
 7. Download the release assets on a clean container, check `SHA256SUMS`, run the README example.
-8. Tell someone: the repo's README, the user's GitHub profile, the place the users are (AUR comments, a forum, Steam page).
+8. Tell someone: the repo's README, his GitHub profile, the place the users are (AUR comments, a forum, Steam page).
 
 ## Across releases
 
@@ -34,18 +34,18 @@ stderr. Old release assets stay up; a bad release gets a fix release (`git rever
 ## Where
 
 GitHub Releases for everything; AUR for Arch users; Flathub for desktop apps (review process, check its current
-rules); Steam or itch.io for games; an own overlay or repo for a distro's users. Portfolio pieces: pinned repos
+rules); Steam for his games (he chose Steam over itch.io); a Gentoo overlay for himself. Portfolio pieces: pinned repos
 with honest READMEs - a recruiter reads the README, the commit history and one source file (`audit-everything`).
 
 ## Legal basics
 
-A LICENSE file (MIT, GPL, or dual); third-party licenses and notices included; no trademarked
-names in product names; patent-encumbered codecs (H.264, HEVC) only through system libraries, not a bundled
+A LICENSE file (MIT, GPL, or dual for his C libraries); third-party licenses and notices included; no trademarked
+names in his product names; patent-encumbered codecs (H.264, HEVC) only through system libraries, not his own
 encoder, without checking first.
 
 ## Earning (zero-cost first)
 
-Freelance and services around the tool, GitHub Sponsors, dual licensing (a commercial license for
+Freelance and his IT-services business (`machine (personal)`), GitHub Sponsors, dual licensing (a commercial license for
 companies that can't take GPL), selling a game on Steam, paid support for a tool clients use. Prices and platform fees
 are looked up when it comes to that (`rules (zero-cost)`).
 
@@ -71,16 +71,16 @@ for packagers. Runtime dependencies listed in the header and in the README table
 ### Release files
 
 `NAME-VERSION-linux-x86_64.tar.gz` (binary, LICENSE, README, third-party notices) plus `SHA256SUMS` from `sha256sum
-*.tar.gz > SHA256SUMS`. A detached signature only once the user has a signing key set up for it.
+*.tar.gz > SHA256SUMS`. A detached signature only once he has a signing key set up for it.
 
 ### Distro packages
 
-- Arch: a `PKGBUILD` (`makepkg -si` to test, `namcap PKGBUILD *.pkg.tar.zst` to lint); AUR for others.
-- Gentoo: an ebuild in an own overlay; `ebuild NAME-VER.ebuild manifest clean install` in a container.
+- Arch/CachyOS: a `PKGBUILD` (`makepkg -si` to test, `namcap PKGBUILD *.pkg.tar.zst` to lint); AUR for others.
+- Gentoo: an ebuild in his own overlay; `ebuild NAME-VER.ebuild manifest clean install` in a container.
 - Flatpak: a manifest built with `flatpak-builder --user --install --force-clean build MANIFEST.yml`; one file to hand
   out: build with `--repo=repo` as well, then `flatpak build-bundle repo NAME.flatpak APP-ID`. Permissions minimal
   (`rea` the app's real needs).
-- AppImage for one-file GUI apps; `.deb` with `dpkg-deb --build` when a client runs Debian.
+- AppImage for one-file GUI apps; `.deb` with `dpkg-deb --build` when a client runs Debian (his migration stack).
 - Godot: export presets in the project, `godot --headless --export-release "Linux" build/NAME.x86_64`.
 
 ### Before calling it packed

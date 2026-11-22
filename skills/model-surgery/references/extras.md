@@ -26,7 +26,7 @@ Each section stands alone. Anything marked UNSURE is from memory: confirm agains
 
 ## Evolutionary / learned merging
 
-- `mergekit-evolve` searches merge weights with CMA-ES against a task score (Sakana's evolutionary model merge idea). It needs a fast, honest scorer; on a small machine that is only feasible for small models. Cost = (number of evaluations) × (merge + score).
+- `mergekit-evolve` searches merge weights with CMA-ES against a task score (Sakana's evolutionary model merge idea). It needs a fast, honest scorer; on this machine that is only feasible for small models. Cost = (number of evaluations) × (merge + score).
 - Other weight estimators: Fisher-weighted averaging, RegMean (closed form from activations), AdaMerging (learn coefficients on unlabeled data). They need calibration data and gradient or activation passes; use them when a plain TIES/DARE merge loses to its best parent.
 
 ## BitDelta and adapter composition (many fine-tunes, one base)

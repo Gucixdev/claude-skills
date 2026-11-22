@@ -3,7 +3,7 @@
 What: two games (or a game and a program) running at the same time on one machine and reacting to each other: a
 Minecraft world and an Elden Ring run in the background, and what happens in one changes the other. The twist is not
 in either game, it is in the glue.
-Boundary: both games offline, mods as in [mods](mods.md); no anti-cheat, no online play; the user's own copies.
+Boundary: both games offline, mods as in [mods](mods.md); no anti-cheat, no online play; his own copies.
 
 ## 1. Shape
 
@@ -60,17 +60,17 @@ mc    player_hurt  -           er    heal  -5%                       15
 - Safe mode: a single switch (a file, a key) that makes the router log and drop all actions. Used first, with
   the log read, before the actions are turned on.
 - Latency: game ticks are 50 ms in Minecraft and about 16 ms per frame in a game; rules run in the router, so
-  budget a few hundred milliseconds end to end and measure it (`verify (bench)`). Time-critical combinations belong in one
+  budget a few hundred milliseconds end to end and measure it (`code (bench)`). Time-critical combinations belong in one
   adapter, not through the bus.
 
 ## 5. Testing
 
 1. A fake game: a script that emits a recorded event list and prints the actions it receives; the router and the rules are
-   tested against it without starting either game (`verify`).
+   tested against it without starting either game (`code (done)`).
 2. Replay a real `events.jsonl` into the router and diff the actions it sends against the expected ones.
 3. One adapter live at a time, the other faked, then both. The log answers "why did X happen".
 4. Load: a modded game with both running is a big load; check memory and CPU before it ships to a weaker
-   machine (check the target's specs).
+   machine (his 1050 Ti, `machine`).
 
 ## 6. Where it goes
 

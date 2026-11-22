@@ -76,7 +76,7 @@ mix. The model grows (all experts are stored) and the router has to be trained, 
    ```
 3. The router layers are **untrained: train them** on a mix of the experts' domains with an ordinary HF `Trainer`. Load the composed checkpoint through mergoo's own classes, e.g. `from mergoo.models.modeling_mistral import MistralForCausalLM; MistralForCausalLM.from_pretrained(path)` (README example for Mistral; use the `modeling_<family>` module for yours). A "weights not initialised" warning for the gate layers is expected.
 4. Check: it must beat each parent on that parent's own task and not lose elsewhere, and report total parameters against active parameters per token. The check in [SKILL.md](../SKILL.md) applies, plus a per-domain score.
-5. On a small machine: composing a 1.5B base with 2-3 experts means 3-4× the weights; it composes on CPU, but router training wants a bigger GPU. See also [split](split.md) (dense to MoE).
+5. This machine: composing a 1.5B base with 2-3 experts means 3-4× the weights; it composes on CPU, but router training wants a bigger GPU. See also [split](split.md) (dense to MoE).
 
 ## omnimergekit
 

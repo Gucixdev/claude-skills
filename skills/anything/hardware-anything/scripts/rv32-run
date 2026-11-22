@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# rv32-run - compile a freestanding C (or .S) file for RV32I, run it on QEMU's riscv32 "virt" board, show its output.
+#
+# usage: rv32-run [-m ARCH] [-d] [-i] FILE.c [FILE2.c ...]
+#   -m ARCH   -march, default rv32i (try rv32im, rv32imc); this is the ISA a custom core has to match
+#   -d        also print the disassembly (llvm-objdump) before running
+#   -i        also run the same program on the C reference simulator (rv32/iss.c, RV32I only) and compare output and
+#             exit status with QEMU; a mismatch is exit 1. The pattern for checking a hardware core: same program, same answer.
+# The program's main() returns 0 for pass. UART output (0x10000000) is shown. A hang is cut after 10 s.
+# No newlib: no printf, no malloc; write bytes to the UART yourself (see ../examples/hello.c).
+# Exit status: the program's (0 pass), 2 bad usage or a missing tool, 124 timeout.
+
+case ${1:-} in -h | --help | '') awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;; esac
+arch=rv32i dis=0 iss=0
+while [ $# -gt 0 ]; do
+	case $1 in
+		-m) arch=$2; shift ;;
+		-d) dis=1 ;;
+		-i) iss=1 ;;
+		-*) echo "rv32-run: unknown option $1" >&2; exit 2 ;;
+		*) break ;;
+	esac
+	shift
+done
+[ $# -ge 1 ] || { echo "rv32-run: no source file" >&2; exit 2; }
+here=$(dirname "$(readlink -f -- "$0")")
+for t in clang ld.lld qemu-system-riscv32; do command -v "$t" > /dev/null || { echo "rv32-run: $t not installed" >&2; exit 2; }; done
+tmp=$(mktemp -d) && trap 'rm -rf -- "$tmp"' EXIT
+objs=()
+for src in "$here/rv32/crt0.S" "$@"; do
+	o="$tmp/$(basename "$src").o"
+	clang --target=riscv32 -march="$arch" -mabi=ilp32 -O2 -ffreestanding -fno-pic -nostdlib -Wall -Wextra -c "$src" -o "$o" || exit 2
+	objs+=("$o")
+done
+ld.lld -T "$here/rv32/link.ld" -o "$tmp/prog.elf" "${objs[@]}" || exit 2
+[ "$dis" = 1 ] && llvm-objdump -d --no-show-raw-insn "$tmp/prog.elf"
+timeout 10 qemu-system-riscv32 -machine virt -bios none -nographic -monitor none -serial stdio \
+	-device loader,file="$tmp/prog.elf" < /dev/null > "$tmp/qemu.out"
+st=$?
+cat "$tmp/qemu.out"
+echo "[exit $st]"
+if [ "$iss" = 1 ]; then
+	llvm-objcopy -O binary "$tmp/prog.elf" "$tmp/prog.bin" || exit 2
+	cc -std=c89 -pedantic -Wall -Wextra -O2 -o "$tmp/iss" "$here/rv32/iss.c" || exit 2
+	timeout 10 "$tmp/iss" "$tmp/prog.bin" > "$tmp/iss.out"
+	ist=$?
+	if [ "$ist" = "$st" ] && cmp -s "$tmp/qemu.out" "$tmp/iss.out"; then echo "[iss agrees with qemu: same output, same exit status]"
+	else echo "[iss DISAGREES: exit $ist vs qemu $st]"; diff "$tmp/qemu.out" "$tmp/iss.out" | head -5; exit 1; fi
+fi
+exit "$st"

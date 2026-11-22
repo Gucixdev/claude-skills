@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""skills-retrieve - the top chunks of the skills for a task, ranked by meaning plus words, under a byte cap.
+
+Same chunks as skills-find. Two rankings are fused by rank (weighted reciprocal rank fusion, the idea of vecindex's
+vi_search_hybrid): BM25 over the words (weight 0.3), and cosine over sentence embeddings (weight 1) from all-MiniLM-L6-v2 run in plain numpy (weights
+from the local Hugging Face cache; nothing is downloaded, no torch, no server). Embeddings are cached by chunk hash in
+${XDG_CACHE_HOME:-~/.cache}/claude-config/skills-index, so only new or edited chunks are embedded again. Without
+numpy, tokenizers, safetensors or the cached model it says so on stderr and ranks by words only (lexical).
+
+usage: skills-retrieve [-k N] [-m BYTES] [-s NAME] [--lexical] [--json] TASK_TEXT...
+  -k N       chunks to print (default 4)
+  -m BYTES   stop printing when the output reaches this many bytes (default 3000)
+  -s NAME    only this skill (repeatable)
+  --lexical  words only, skip the embedder
+  --json     one JSON object per chunk (path, line, score, text) instead of text
+Prints "path:line  score" then the chunk, a blank line between chunks. Exit 0 with hits, 1 without, 2 bad usage.
+SKILLS_DIR overrides the skills/ folder next to bin/; SKILLS_EMBED_MODEL a model folder holding model.safetensors
+and tokenizer.json. Example: skills-retrieve -k 3 make an enclosure for a board
+"""
+import glob, hashlib, importlib.machinery, importlib.util, json, os, sys
+sys.dont_write_bytecode = True
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+RRF = 60
+W_LEX, W_DEN = 0.3, 1.0  # measured on evals/retrieval*.tsv: embeddings carry the ranking, words are a lighter vote
+MAXTOK = 256
+
+def load_find():
+    p = os.path.join(HERE, "skills-find")
+    spec = importlib.util.spec_from_loader("skills_find", importlib.machinery.SourceFileLoader("skills_find", p))
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    return m
+
+def model_dir():
+    d = os.environ.get("SKILLS_EMBED_MODEL")
+    if d: return d if os.path.isfile(os.path.join(d, "model.safetensors")) else None
+    hub = os.path.join(os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface"), "hub")
+    for pat in ("models--sentence-transformers--all-MiniLM-L6-v2",):
+        for d in sorted(glob.glob(os.path.join(hub, pat, "snapshots", "*"))):
+            if os.path.isfile(os.path.join(d, "model.safetensors")) and os.path.isfile(os.path.join(d, "tokenizer.json")):
+                return d
+    return None
+
+class Bert:
+    """BERT encoder (MiniLM-sized) in numpy: mean-pooled, unit-length sentence vectors."""
+    def __init__(self, d):
+        import numpy as np
+        from safetensors import safe_open
+        from tokenizers import Tokenizer
+        self.np = np
+        cfg = json.load(open(os.path.join(d, "config.json")))
+        self.H, self.heads, self.L = cfg["hidden_size"], cfg["num_attention_heads"], cfg["num_hidden_layers"]
+        self.eps = cfg.get("layer_norm_eps", 1e-12)
+        f = safe_open(os.path.join(d, "model.safetensors"), "numpy")
+        self.w = {k: f.get_tensor(k).astype(np.float32) for k in f.keys()}
+        self.tk = Tokenizer.from_file(os.path.join(d, "tokenizer.json"))
+        self.tk.no_padding()  # the tokenizer file may pad to 128; padding is done here, with a mask
+        self.tk.enable_truncation(MAXTOK)
+        self.dim = self.H
+
+    def _ln(self, x, p):
+        np = self.np
+        mu = x.mean(-1, keepdims=True); var = ((x - mu) ** 2).mean(-1, keepdims=True)
+        return (x - mu) / np.sqrt(var + self.eps) * self.w[p + ".weight"] + self.w[p + ".bias"]
+
+    def _gelu(self, x):
+        np = self.np
+        return 0.5 * x * (1.0 + self._erf(x / np.sqrt(2.0)))
+
+    def _erf(self, x):  # Abramowitz-Stegun 7.1.26, error < 1.5e-7, enough for a ranking
+        np = self.np
+        s = np.sign(x); x = np.abs(x); t = 1.0 / (1.0 + 0.3275911 * x)
+        y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * np.exp(-x * x)
+        return s * y
+
+    def _batch(self, texts):
+        np, w = self.np, self.w
+        enc = self.tk.encode_batch(texts)
+        n = max(len(e.ids) for e in enc)
+        ids = np.zeros((len(enc), n), dtype=np.int64); mask = np.zeros((len(enc), n), dtype=np.float32)
+        for i, e in enumerate(enc):
+            ids[i, :len(e.ids)] = e.ids; mask[i, :len(e.ids)] = 1
+        x = w["embeddings.word_embeddings.weight"][ids] + w["embeddings.position_embeddings.weight"][:n][None] \
+            + w["embeddings.token_type_embeddings.weight"][0][None, None]
+        x = self._ln(x, "embeddings.LayerNorm")
+        bias = (1.0 - mask)[:, None, None, :] * -1e9
+        dh = self.H // self.heads
+        for l in range(self.L):
+            p = f"encoder.layer.{l}."
+            def lin(h, name): return h @ w[p + name + ".weight"].T + w[p + name + ".bias"]
+            def split(h): return h.reshape(h.shape[0], n, self.heads, dh).transpose(0, 2, 1, 3)
+            q, k, v = split(lin(x, "attention.self.query")), split(lin(x, "attention.self.key")), split(lin(x, "attention.self.value"))
+            s = q @ k.transpose(0, 1, 3, 2) / np.sqrt(dh) + bias
+            s = np.exp(s - s.max(-1, keepdims=True)); s /= s.sum(-1, keepdims=True)
+            a = (s @ v).transpose(0, 2, 1, 3).reshape(x.shape[0], n, self.H)
+            x = self._ln(x + lin(a, "attention.output.dense"), p + "attention.output.LayerNorm")
+            h = self._gelu(lin(x, "intermediate.dense"))
+            x = self._ln(x + lin(h, "output.dense"), p + "output.LayerNorm")
+        m = mask[:, :, None]
+        e = (x * m).sum(1) / np.maximum(m.sum(1), 1)
+        return e / np.maximum(np.linalg.norm(e, axis=1, keepdims=True), 1e-12)
+
+    def embed(self, texts, bs=16, progress=False):
+        """Unit vectors for texts. numpy here is linked to the reference BLAS (one core, ~2 GMAC/s), so a big first
+        build is spread over forked workers; a handful of texts (a query) is done in this process."""
+        np = self.np
+        if not texts: return np.zeros((0, self.dim), dtype=np.float32)
+        order = sorted(range(len(texts)), key=lambda i: len(texts[i]))  # similar lengths per batch, less padding
+        batches = [order[a:a + bs] for a in range(0, len(order), bs)]
+        out = np.zeros((len(texts), self.dim), dtype=np.float32)
+        workers = min(len(batches), len(os.sched_getaffinity(0)), 8) if len(texts) > 2 * bs else 1
+        global _G, _T
+        _G, _T = self, texts
+        if workers > 1:
+            import multiprocessing as mp
+            with mp.get_context("fork").Pool(workers) as pool:
+                for n, (idx, vec) in enumerate(pool.imap_unordered(_work, batches), 1):
+                    out[idx] = vec
+                    if progress: print(f"\rskills-retrieve: embedding {n}/{len(batches)} batches", end="", file=sys.stderr, flush=True)
+            if progress: print(file=sys.stderr)
+        else:
+            for idx in batches: out[idx] = self._batch([texts[i] for i in idx])
+        return out
+
+_G = _T = None
+
+def _work(idx):
+    return idx, _G._batch([_T[i] for i in idx])
+
+def embed_text(c):
+    rel = c[0].split("/")
+    name = (rel[-3] if len(rel) > 3 and rel[-2] == "references" else rel[-2]) + " " + rel[-1][:-3]
+    return f"{name}. {c[4].lstrip('# ')}\n{c[2]}"
+
+def cache_dir():
+    return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "claude-config", "skills-index")
+
+def chunk_vectors(bert, mid, chunks):
+    """One vector per chunk, from the cache when the chunk's text is unchanged; the cache is rewritten to match."""
+    np = bert.np
+    d = cache_dir(); vf, kf = os.path.join(d, "vecs.npy"), os.path.join(d, "keys.json")
+    texts = [embed_text(c) for c in chunks]
+    keys = [hashlib.sha1((mid + "\0" + t).encode()).hexdigest() for t in texts]
+    have = {}
+    try:
+        old = json.load(open(kf)); vv = np.load(vf)
+        if old.get("model") == mid and old.get("dim") == bert.dim and len(old["keys"]) == len(vv):
+            have = {k: vv[i] for i, k in enumerate(old["keys"])}
+    except (OSError, ValueError, KeyError): pass
+    miss = [i for i, k in enumerate(keys) if k not in have]
+    if miss:
+        new = bert.embed([texts[i] for i in miss], progress=True)
+        for j, i in enumerate(miss): have[keys[i]] = new[j]
+        try:
+            os.makedirs(d, exist_ok=True)
+            tv, tk = vf + f".{os.getpid()}.tmp", kf + f".{os.getpid()}.tmp"
+            with open(tv, "wb") as fh: np.save(fh, np.stack([have[k] for k in keys]))
+            json.dump({"model": mid, "dim": bert.dim, "keys": keys}, open(tk, "w"))
+            os.replace(tv, vf); os.replace(tk, kf)
+        except OSError as e:
+            print(f"skills-retrieve: cache not written ({e})", file=sys.stderr)
+    return np.stack([have[k] for k in keys]), len(miss)
+
+def rank_of(scores, keep):
+    """Chunk indexes best first, only those with keep(score)."""
+    return [i for i in sorted(range(len(scores)), key=lambda i: -scores[i]) if keep(scores[i])]
+
+def retrieve(chunks, q_text, lexical=False, find=None):
+    """[(fused score, index)] best first; the second value tells how the ranking was made."""
+    find = find or load_find()
+    lex = find.bm25(chunks, find.tok(q_text))
+    r_lex = rank_of(lex, lambda s: s > 0)
+    r_den, how = [], "lexical"
+    md = None if lexical else model_dir()
+    if md:
+        try:
+            bert = Bert(md)
+            vecs, _ = chunk_vectors(bert, os.path.basename(os.path.dirname(md)) + "/" + os.path.basename(md) + "|v2", chunks)
+            qv = bert.embed([q_text])[0]
+            sim = (vecs @ qv).tolist()
+            r_den, how = rank_of(sim, lambda s: True)[:50], "hybrid"
+        except Exception as e:  # missing numpy/tokenizers/safetensors or a broken model: words only
+            print(f"skills-retrieve: embedder unavailable ({type(e).__name__}: {e}); ranking by words only (lexical)", file=sys.stderr)
+    elif not lexical:
+        print("skills-retrieve: no local embedding model found; ranking by words only (lexical)", file=sys.stderr)
+    fused = {}
+    for w, r in ((W_LEX, r_lex[:50]), (W_DEN, r_den)):
+        for pos, i in enumerate(r): fused[i] = fused.get(i, 0.0) + w / (RRF + pos + 1)
+    return sorted(((s, i) for i, s in fused.items()), key=lambda x: -x[0]), how
+
+def main(argv):
+    k, cap, only, words, lexical, js = 4, 3000, [], [], False, False
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-h", "--help"): print(__doc__.strip()); return 0
+        if a == "--lexical": lexical = True; i += 1; continue
+        if a == "--json": js = True; i += 1; continue
+        if a in ("-k", "-m", "-s"):
+            if i + 1 >= len(argv): print(f"skills-retrieve: {a} needs a value", file=sys.stderr); return 2
+            v = argv[i + 1]; i += 2
+            if a == "-s": only.append(v); continue
+            if not v.isdigit() or int(v) < 1: print(f"skills-retrieve: {a} wants a positive number", file=sys.stderr); return 2
+            if a == "-k": k = int(v)
+            else: cap = int(v)
+            continue
+        if a.startswith("-") and len(a) > 1 and not words:
+            print(f"skills-retrieve: unknown option {a} (see --help)", file=sys.stderr); return 2
+        words.append(a); i += 1
+    if not words: print("skills-retrieve: need a TASK_TEXT (see --help)", file=sys.stderr); return 2
+    find = load_find()
+    root = os.path.realpath(os.environ.get("SKILLS_DIR") or os.path.join(HERE, "..", "skills"))
+    if not os.path.isdir(root): print(f"skills-retrieve: no folder {root}", file=sys.stderr); return 2
+    chunks = find.load_chunks(root, only)
+    if not chunks: print("skills-retrieve: no skill text found", file=sys.stderr); return 2
+    if not find.tok(" ".join(words)): print("skills-retrieve: the task text has no words", file=sys.stderr); return 2
+    ranked, how = retrieve(chunks, " ".join(words), lexical, find)
+    if not ranked: return 1
+    used = 0
+    for s, i in ranked[:k]:
+        c = chunks[i]
+        out = (json.dumps({"path": c[0], "line": c[1], "score": round(s, 5), "text": c[2]}) + "\n") if js \
+            else f"{c[0]}:{c[1]}  {s:.4f}\n{c[2]}\n\n"
+        if used and used + len(out.encode()) > cap: break
+        sys.stdout.write(out); used += len(out.encode())
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

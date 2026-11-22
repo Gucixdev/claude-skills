@@ -2,7 +2,7 @@
 
 What: a website or web app whose data or actions you need as a program: the API behind a page, a login flow, an export
 that has no button. How: the page already shows the API to the browser; read it there, then call it with `curl`.
-The API is usually the product (`scrape-everything`). Only accounts and data of the user's own, within the site's terms.
+The API is usually the product (`scrape-everything`). Only accounts and data of his own, within the site's terms.
 
 ## 1. Record one action
 
@@ -47,7 +47,7 @@ Find out which of these it uses: a session cookie set after a login POST; a bear
 `/token` call with an expiry and a refresh; an API key header; a signed URL. Note where it comes from, how long it
 lives, how it is refreshed. The login form itself is one more request in the HAR: the field names matter, the
 values do not. Two-factor, CAPTCHAs and "are you a robot" pages are the site saying no to automation: stop there
-unless it is the user's own account and the site offers an API token instead.
+unless it is his own account and the site offers an API token instead.
 
 ## 5. Habits of real APIs
 

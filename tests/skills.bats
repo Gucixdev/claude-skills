@@ -118,3 +118,97 @@ mk() {	# mk NAME PRIORITY TAGS REQUIRES [DESCRIPTION]
 	[[ "$output" == *"trash $dest/beta (its skill is gone)"* ]]
 	[ ! -L "$dest/beta" ]
 }
+
+@test "skills eval: with the skill the fake model passes, without it fails, lift is shown, -t gates" {
+	F=$BATS_TEST_DIRNAME/fake/fake-model
+	export SKILLS_DIR=$BATS_TEST_DIRNAME/../skills
+	run "$BATS_TEST_DIRNAME/../bin/skills" eval -b cmd -c "$F" code
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"code: with skill 2/2, without 0/2, lift +2"* ]]
+	run "$BATS_TEST_DIRNAME/../bin/skills" eval -n -b cmd -c "true" -t 100 code
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"FAIL with skill: 001-no-ceremony (missing /-l/)"* ]]
+	run "$BATS_TEST_DIRNAME/../bin/skills" eval -b cmd -c "$F" nosuchskill
+	[ "$status" -eq 2 ]
+}
+
+@test "skills export: a card under the cap, parts with paths, router written, over-cap exits 1 but still writes" {
+	export SKILLS_DIR=$BATS_TEST_DIRNAME/../skills
+	run "$BATS_TEST_DIRNAME/../bin/skills" export -m 100000 code
+	[ "$status" -eq 0 ]
+	[[ "$output" == "# code"* && "$output" == *"skills/code/references/saas.md"* ]]
+	run "$BATS_TEST_DIRNAME/../bin/skills" export -m 200 -o "$BATS_TEST_TMPDIR/out" code rules
+	[ "$status" -eq 1 ]
+	[ -s "$BATS_TEST_TMPDIR/out/cards/code.md" ] && grep -q '^- code:' "$BATS_TEST_TMPDIR/out/AGENTS.md"
+	run "$BATS_TEST_DIRNAME/../bin/skills" export nosuch
+	[ "$status" -eq 2 ]
+}
+
+@test "skills find: ranks the matching chunk first with path:line, -s limits, no hit exits 1, bad usage 2" {
+	export SKILLS_DIR=$BATS_TEST_DIRNAME/../skills
+	run "$BATS_TEST_DIRNAME/../bin/skills" find compress a prose file
+	[ "$status" -eq 0 ]
+	[[ "${lines[0]}" == skills/code/references/compress.md:* ]]
+	run "$BATS_TEST_DIRNAME/../bin/skills" find -s model-surgery -k 1 quantize vram
+	[[ "${lines[0]}" == skills/model-surgery/* ]]
+	run "$BATS_TEST_DIRNAME/../bin/skills" find zzzqqxx
+	[ "$status" -eq 1 ]
+	run "$BATS_TEST_DIRNAME/../bin/skills" find
+	[ "$status" -eq 2 ]
+}
+
+@test "skills eval -j: passing with-skill answers become SFT lines without the skill text in the prompt" {
+	export SKILLS_DIR=$BATS_TEST_DIRNAME/../skills
+	run "$BATS_TEST_DIRNAME/../bin/skills" eval -n -b cmd -c "$BATS_TEST_DIRNAME/fake/fake-model" -j "$BATS_TEST_TMPDIR/sft.jsonl" code
+	[ "$status" -eq 0 ]
+	[ "$(wc -l < "$BATS_TEST_TMPDIR/sft.jsonl")" -eq 2 ]
+	jq -e '.messages[0].role == "user" and .messages[1].content == "-l"' <(head -1 "$BATS_TEST_TMPDIR/sft.jsonl")
+}
+
+mkdoc() {	# mkdoc SKILL TEXT: a one-chunk reference file
+	mkdir -p "$SKILLS_DIR/$1/references"
+	printf -- '---\nname: %s\ndescription: %s skill.\n---\n\n# %s\n\n' "$1" "$1" "$1" > "$SKILLS_DIR/$1/SKILL.md"
+	printf '# %s (part)\n\n%s\n' "$1" "$2" > "$SKILLS_DIR/$1/references/part.md"
+}
+
+@test "skills retrieve --lexical: ranks by words with path:line, -m caps the bytes, -s limits, usage errors exit 2" {
+	export XDG_CACHE_HOME=$BATS_TEST_TMPDIR/cache
+	mkdoc baking 'Mix flour, yeast and water, let the dough prove, bake at 230 degrees.'
+	mkdoc engines 'Drain the oil, change the filter, refill the sump with new oil.'
+	run "$S" retrieve --lexical change the oil filter
+	[ "$status" -eq 0 ]
+	[[ "${lines[0]}" == *engines/references/part.md:1* ]]
+	run "$S" retrieve --lexical -k 5 -m 10 the dough oil
+	[ "$status" -eq 0 ]
+	[ "$(grep -c 'part.md:1' <<< "$output")" -eq 1 ]
+	run "$S" retrieve --lexical -s baking -k 5 oil dough
+	[ "$(grep -c 'part.md:1' <<< "$output")" -eq 1 ] && [[ "${lines[0]}" == *baking/* ]]
+	run "$S" retrieve --lexical zzzqqxx
+	[ "$status" -eq 1 ]
+	run "$S" retrieve
+	[ "$status" -eq 2 ]
+	run "$S" retrieve -k 0 oil
+	[ "$status" -eq 2 ]
+	[ ! -e "$XDG_CACHE_HOME/claude-config" ]	# the lexical path never touches the cache
+}
+
+@test "skills retrieve: embeddings find a chunk that shares no word with the task, and the cache is reused until a file changes" {
+	REAL_HOME=$(getent passwd "$(id -u)" | cut -d: -f6)
+	export HF_HOME=${HF_HOME:-$REAL_HOME/.cache/huggingface} XDG_CACHE_HOME=$BATS_TEST_TMPDIR/cache PYTHONUSERBASE=${PYTHONUSERBASE:-$REAL_HOME/.local}
+	ls "$HF_HOME"/hub/models--sentence-transformers--all-MiniLM-L6-v2/snapshots/*/model.safetensors > /dev/null 2>&1 || skip "no local MiniLM in $HF_HOME"
+	python3 -c 'import numpy, tokenizers, safetensors' 2> /dev/null || skip "numpy, tokenizers or safetensors missing"
+	mkdoc baking 'Mix flour, yeast and water, let the dough prove, bake at 230 degrees.'
+	mkdoc engines 'Drain the oil, change the filter, refill the sump with new oil.'
+	mkdoc gardening 'Water the tomato seedlings in the morning and prune the lower leaves.'
+	run "$S" retrieve -k 1 how do I make a loaf of bread
+	[ "$status" -eq 0 ]
+	[[ "${lines[0]}" == *baking/references/part.md:1* ]]
+	idx=$XDG_CACHE_HOME/claude-config/skills-index
+	[ -s "$idx/vecs.npy" ] && [ -s "$idx/keys.json" ]
+	m1=$(stat -c %Y.%y "$idx/vecs.npy")
+	run "$S" retrieve -k 1 how do I make a loaf of bread
+	[ "$(stat -c %Y.%y "$idx/vecs.npy")" = "$m1" ]	# unchanged files: no re-embedding, cache not rewritten
+	printf '\nMore about rye sourdough.\n' >> "$SKILLS_DIR/baking/references/part.md"
+	run "$S" retrieve -k 1 sourdough starter
+	[ "$(stat -c %Y.%y "$idx/vecs.npy")" != "$m1" ]	# an edited chunk is embedded again
+}

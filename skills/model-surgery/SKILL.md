@@ -1,10 +1,10 @@
 ---
 name: model-surgery
-description: Step-by-step recipes for working on model weights - reading raw safetensors/GGUF to find what is wrong (dtype, NaN, vocab/EOS mismatch, outlier layers), quantizing (GGUF K-quants and imatrix with llama.cpp, fitting a model into 4 GB of VRAM), merging checkpoints (linear, SLERP, task arithmetic, TIES, DARE, mergoo MoE, omnimergekit), pruning (magnitude, Wanda, SparseGPT, layer removal), fine-tuning (LoRA/QLoRA, expert iteration with a verifier), distillation, BitNet, attention to linear/DeltaNet, split and offload, steering vectors, vocab transplant, expert pruning, building agents with AGENTS.md and frameworks, and finding the circuit behind a failure (activation patching, ablation). Always ends in a before/after check so a surgery never ships a lobotomised model. Use for quantize, kwantyzuj, merge, prune, finetune, LoRA, distill, BitNet, DeltaNet, mergoo, GGUF, safetensors, surowe wagi, circuit, obwody, or "co jest nie tak z tym modelem".
+description: Recipes for model weights - raw safetensors/GGUF, quantizing (K-quants, imatrix, 4 GB VRAM), merging (SLERP, TIES, DARE), pruning, LoRA/QLoRA, distillation, BitNet, steering vectors, vocab transplant. Always ends in a before/after check. Use for quantize, merge, prune, finetune, LoRA, distill, GGUF, safetensors, surowe wagi, obwody.
 metadata:
   priority: "2"
   tags: "#models #quantization #merge #prune #finetune #distill #bitnet #agents #circuits #weights #gguf #safetensors #llm"
-  requires: "skill:verify skill:rules cmd:python3 ?cmd:cmake"
+  requires: "skill:code skill:rules cmd:python3 ?cmd:cmake"
 ---
 
 # model-surgery
@@ -26,6 +26,7 @@ steps with the command, because the point is to do it the same way twice.
 | model diffing, steering vectors, vocab transplant, speculative heads, early exit, expert pruning, BitDelta | [extras](references/extras.md) |
 | build an agent (loop, tools, limits), write an AGENTS.md, pick a framework | [agents](references/agents.md) |
 | find which part of the network does a behaviour | [circuits](references/circuits.md) |
+| which techniques pay most on a small model (best-of-N, GRPO, per-tensor quant, YaRN, SimPO/ORPO) and in what order | [levers](references/levers.md) |
 
 ## Scripts (`scripts/`, bash, `-h` prints the header)
 
@@ -55,14 +56,13 @@ Tested with fakes (`scripts/tests/`, `tests/model-surgery.bats` in the repo); `q
 2. Generate before the surgery, save the outputs. Generate after, diff by eye on at least 5, and count failures:
    empty output, repetition loops, no stop token, gibberish, wrong language.
 3. A number: perplexity on a held-out text of the same domain, or the task metric. For Lean provers the metric is
-   free and exact: the proof pass rate of a proof-search harness (ask the model for proofs, let Lean check them, count the accepted ones) on a fixed `goals.md`, Lean as the judge.
+   free and exact: the proof pass rate of `symbiote/bin/freeworker (its own repo)` on a fixed `goals.md`, Lean as the judge.
 4. **Termination**: confirm the model stops by itself (hits EOS) within the token limit on every prompt.
 5. Accept only when the task metric did not drop more than the budget you set *before* starting.
 
-## A small machine
+## This machine
 
-The recipes assume a small box: a 4 GB GPU without tensor cores or sparse 2:4 (an older consumer card), CPU for everything
-big. 8B models do not fit in VRAM even at 4 bits; plan for partial offload or a smaller model. Check what the machine
-really has (`nvidia-smi`, `free -h`) before trusting this section. Unauthenticated Hugging Face downloads can be slow:
-`aria2c -x16 -s16 -c` resumes. Keep models in one folder (`~/models/`). Ollama, if installed, takes GGUF files through a
-`Modelfile`.
+GTX 1050 Ti (Pascal, 4 GB VRAM, no tensor cores, no sparse 2:4), CPU for everything big. 8B models do not fit in
+VRAM even at 4 bits; plan for partial offload or a smaller model. Downloads here are slow unauthenticated (about
+0.5 MB/s per connection): use `aria2c -x16 -s16 -c`, which resumes. Keep models under `~/models/` (`/data` itself
+is root-owned). Ollama is running; it takes GGUF files through a `Modelfile`.

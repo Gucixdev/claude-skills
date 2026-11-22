@@ -1,6 +1,6 @@
 ---
 name: cli-everything
-description: Drive any program through its CLI or a REST API, never an MCP server unless there is no other way - MCP is the last resort. Order - the program's own CLI, a REST API, a wrapper CLI of ours (one bash file or a small daemon plus client, state allowed, --json, a REPL, exit codes that mean something), and only then a found, read and registered MCP server (references/mcp.md). Use when asked to connect or drive a program, wrap a GUI, expose a tool to agents, or before adding any MCP server.
+description: Drive any program through its CLI or a REST API, MCP only as the last resort. Order - the program own CLI, a REST API, a wrapper CLI of ours (one bash file or small daemon, --json, exit codes), and only then a found, read and registered MCP server. Use to connect or drive a program, wrap a GUI, expose a tool to agents, or before adding any MCP server.
 metadata:
   priority: "2"
   tags: "#cli #rest #mcp #agents #bash #dev #thirdparties #automation #integration"
@@ -9,13 +9,13 @@ metadata:
 
 # cli-everything
 
-The user's decision (2026-11-08, restated 2026-11-14): CLI and REST are far better than MCP; MCP only as a last resort.
+His decision (2026-11-08, restated 2026-11-14): CLI and REST are far better than MCP; MCP only as a last resort.
 
 Order of preference: 1. the program's own CLI; 2. its REST API (curl and jq); 3. a wrapper CLI of ours, one bash file
 for a GUI that only drives a CLI or files (`bash-everything`); 4. an MCP server, with the checks in `mcp`.
 A repeated call becomes a script (`automate-everything`).
 
-Default: expose tools through plain CLIs (for example in the style of CLI-Anything, https://github.com/HKUDS/CLI-Anything) instead of MCP.
+He wants CLI-Anything (https://github.com/HKUDS/CLI-Anything) to become the standard way tools are exposed to me, instead of MCP.
 
 Why: an MCP server is dead weight - one more process to run, its tool schemas sit in every context whether used or
 not, it adds an auth surface and a thing to trust, and it can only do what its author exposed. A CLI is composable (pipes,
@@ -42,13 +42,13 @@ Rules:
 - Default to a plain CLI over a new MCP server. A wrapped app gets: a `--json` mode, a `repl` where state matters, and a
   `help --all` / `--dump-api` listing of its commands.
 - Skills (SKILL.md) describe the CLI; the CLI does the work. Install harnesses from the CLI-Hub / plugin marketplace
-  (`/plugin marketplace add HKUDS/CLI-Anything`) only when the user asks; otherwise write one in the same shape.
-- Existing MCPs (godot, graphify, blender) stay until a CLI replaces them; do not remove them unasked. The shape to copy: a CLI first (`ask|api|services|...`, `dump-api`, `--json`, exit codes 0/1/2/3) with the MCP server as a thin wrapper over the same code. One generic REST caller (`api SERVICE METHOD PATH`, a registry file, writes shown until `--yes`) beats one wrapper per API.
-- Same shape as the other tools here: `bash-everything` for bash wrappers, C for fast ones.
+  (`/plugin marketplace add HKUDS/CLI-Anything`) only when he asks; otherwise write our own in the same shape.
+- Existing MCPs (godot, graphify, blender) stay until a CLI replaces them; do not remove them unasked. `openapi` already is a CLI first (`src/openapi.py ask|api|services|...`, `dump-api`, `--json`, exit codes 0/1/2/3) with the MCP server as a thin wrapper over the same code: the shape to copy. One generic REST caller (`api SERVICE METHOD PATH`, a registry file, writes shown until `--yes`) beats one wrapper per API.
+- Same shape as our own tools: `bash-everything` for bash wrappers, C for fast ones.
 - Verify the upstream README before claiming specifics (features change); only confirmed so far for CLI-Anything: a
   `--json` flag, a shared REPL, harnesses for GIMP/Blender/Inkscape/Audacity/LibreOffice/OBS, SKILL.md under top-level
   `skills/`.
 
 ## Parts
 
-- [mcp](references/mcp.md) - The last resort: does it need an MCP server at all, existing servers first, read it before it runs as the user, building one on the program's scripting surface, registering and testing it.
+- [mcp](references/mcp.md) - The last resort: does it need an MCP server at all, existing servers first, read it before it runs as him, building one on the program's scripting surface, registering and testing it.

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# pcb-check - the gate for a KiCad board: ERC on the schematic, DRC on the PCB, and the files a fab needs.
+#
+# usage: pcb-check [-o OUTDIR] PROJECT_DIR|FILE.kicad_pcb
+#   Looks for NAME.kicad_sch next to NAME.kicad_pcb. Runs, in this order:
+#     ERC (schematic, if there is one)   kicad-cli sch erc   --severity-error --exit-code-violations
+#     DRC (board)                        kicad-cli pcb drc   --severity-error --exit-code-violations --schematic-parity (with a schematic)
+#     stats, Gerbers + drill, STEP, a 3D render and a BOM, into OUTDIR (default ./fab)
+#   Warnings are listed, not fatal; errors are. A board that fails DRC makes no fab files at all, so a broken
+#   board can never be sent by accident.
+# Exit 0 clean, 1 violations, 2 bad usage or no kicad-cli.
+
+case ${1:-} in -h | --help | '') awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;; esac
+out=fab
+if [ "${1:-}" = -o ]; then out=${2:?pcb-check: -o needs a folder}; shift 2; fi
+command -v kicad-cli > /dev/null || { echo "pcb-check: kicad-cli not installed" >&2; exit 2; }
+t=${1:?pcb-check: no project}
+if [ -d "$t" ]; then pcb=$(find "$t" -maxdepth 2 -name '*.kicad_pcb' | head -1); else pcb=$t; fi
+[ -f "$pcb" ] || { echo "pcb-check: no .kicad_pcb in $t" >&2; exit 2; }
+sch=${pcb%.kicad_pcb}.kicad_sch
+mkdir -p "$out" || exit 2
+bad=0
+kc() { kicad-cli "$@" 2>&1 > /dev/null | grep -v "Debug:" >&2; return "${PIPESTATUS[0]}"; }	# kicad-cli prints wx debug noise on stderr
+
+if [ -f "$sch" ]; then
+	echo "== ERC $sch"
+	kc sch erc --severity-error --exit-code-violations -o "$out/erc.rpt" "$sch" || bad=1
+	grep -E '^\*\* ERC messages|Found [0-9]+ violations' "$out/erc.rpt"
+	parity=--schematic-parity
+else
+	echo "== no schematic next to the board: ERC and parity skipped (a board without a schematic is a drawing, not a design)"
+	parity=
+fi
+
+echo "== DRC $pcb"
+kc pcb drc --severity-error --exit-code-violations $parity -o "$out/drc.rpt" "$pcb" || bad=1
+grep -E 'Found [0-9]+ (DRC violations|unconnected|Footprint)' "$out/drc.rpt"
+if [ "$bad" = 1 ]; then
+	echo "pcb-check: FAILED, see $out/*.rpt; no fab files written"
+	exit 1
+fi
+
+kc pcb export stats -o "$out/stats.txt" "$pcb" && sed -n '1,40p' "$out/stats.txt" | grep -iE 'width|height|area|layers|pads|vias|holes' | head -8
+mkdir -p "$out/gerber"
+kc pcb export gerbers -o "$out/gerber/" "$pcb" && kc pcb export drill -o "$out/gerber/" "$pcb" && echo "gerbers + drill: $(ls "$out/gerber" | wc -l) files in $out/gerber"
+kc pcb export step --subst-models -o "$out/board.step" "$pcb" && echo "step: $out/board.step"
+kc pcb render -o "$out/render.png" "$pcb" && echo "render: $out/render.png"
+[ -f "$sch" ] && kc sch export bom -o "$out/bom.csv" "$sch" && echo "bom: $out/bom.csv"
+echo "pcb-check: clean"
+exit 0

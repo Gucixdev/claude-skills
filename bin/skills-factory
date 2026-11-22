@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# skills-factory - every session becomes a skill, or a line in the skill it belongs to. A hook cannot make Claude write
+# after a session has ended, so the work is passed on: SessionEnd (hooks/end-session-gate) queues a digest of the
+# finished session, session-start tells the next session that sessions are waiting, and that session turns each into
+# skills in the factory's own folder, skills/factory/factory-NAME/SKILL.md (his skills elsewhere are not touched; he
+# moves one out when he wants it there). No model is called here: the digest is
+# extracted from the transcript (his words, his corrections and wishes, what Claude did), so it costs nothing.
+#
+#   skills factory queue TRANSCRIPT [SID] [CWD]   digest a finished session into the queue (what SessionEnd runs);
+#                                                 a session with fewer than SKILLS_FACTORY_MIN (3) of his messages is skipped
+#   skills factory list                           the sessions waiting: SID, date, folder, his messages
+#   skills factory next                           the oldest waiting digest, with what to do with it
+#   skills factory digest TRANSCRIPT              the digest of any transcript, to stdout
+#   skills factory done SID [WHAT]                that session is done: its digest moves to done/ with the date and
+#                                                 WHAT came of it (a skill, a line, "nothing"); never deleted
+#
+# The queue: ${SESSION_GATE_DIR:-${XDG_STATE_HOME:-~/.local/state}/session-gate}/factory/SID.md, done ones in
+# factory/done/. Needs jq. Exit status: 0 fine, 1 nothing there, 2 bad usage.
+set -u
+
+state=${SESSION_GATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/session-gate}
+q=$state/factory
+min=${SKILLS_FACTORY_MIN:-3}
+
+die() { printf 'skills factory: %s\n' "$*" >&2; exit 2; }
+usage() { sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; }
+command -v jq > /dev/null 2>&1 || die "needs jq"
+
+CORR='^[[:space:]]*nie([[:space:],.!?]|$)|(^|[^[:alpha:]])(zle|źle|mowilem|mówiłem|mowilam|mówiłam|przeciez|przecież|mialo byc|miało być|ile razy|znowu|nie tak|nie rob|nie rób|wrong|i told you|i said)([^[:alpha:]]|$)'
+WISH='(^|[^[:alpha:]])(zawsze|nigdy|od teraz|chce|chcę|chcemy|wole|wolę|ma byc|ma być|maja byc|mają być|nie chce|nie chcę|always|never|from now on|i want|i prefer)([^[:alpha:]]|$)'
+
+# the transcript as lines: "U<TAB>text" his messages, "T<TAB>name<TAB>file-or-command" Claude's tool calls
+stream() {
+	jq -R -r 'fromjson? // empty
+		| if .type == "user" and (.isMeta | not) then
+			(.message.content | if type == "string" then . elif type == "array" then ([.[] | select(.type == "text") | .text] | join(" ")) else "" end) as $t
+			| if ($t | length) > 0 and ($t | test("^\\s*<(command|local-command|system-reminder|task-notification)") | not)
+			  then "U\t\($t | gsub("[\t\n\r]"; " "))" else empty end
+		  elif .type == "assistant" then
+			.message.content[]? | select(.type == "tool_use")
+			| "T\t\(.name)\t\((.input.file_path // .input.notebook_path // .input.skill // .input.command // .input.path // "") | tostring | gsub("[\t\n\r]"; " ") | .[0:200])"
+		  else empty end' "$1" 2> /dev/null
+}
+
+digest() {	# digest TRANSCRIPT [SID] [CWD]
+	local s nu nt
+	s=$(stream "$1")
+	nu=$(printf '%s\n' "$s" | grep -c '^U	')
+	nt=$(printf '%s\n' "$s" | grep -c '^T	')
+	printf '# session %s\n\nwhen: %s; folder: %s; his messages: %d; tool calls: %d\n' "${2:-?}" "$(date '+%F %T')" "${3:-?}" "$nu" "$nt"
+	printf '\n## his corrections\n'
+	printf '%s\n' "$s" | awk -F'\t' -v re="$CORR" '$1 == "U" && tolower($2) ~ re { print "- " substr($2, 1, 400) }' | head -n 30
+	printf '\n## his wishes and rules (zawsze, nigdy, chce, od teraz...)\n'
+	printf '%s\n' "$s" | awk -F'\t' -v re="$WISH" '$1 == "U" && tolower($2) ~ re { print "- " substr($2, 1, 400) }' | head -n 30
+	printf '\n## everything he wrote, in order\n'
+	printf '%s\n' "$s" | awk -F'\t' '$1 == "U" { print "- " substr($2, 1, 240) }' | head -n 80
+	printf '\n## what Claude did: tools\n'
+	printf '%s\n' "$s" | awk -F'\t' '$1 == "T" { n[$2]++ } END { for (k in n) printf "%d %s\n", n[k], k }' | sort -rn | head -n 15 | sed 's/^/- /'
+	printf '\n## commands run most (first two words)\n'
+	printf '%s\n' "$s" | awk -F'\t' '$1 == "T" && $2 == "Bash" { split($3, w, " "); c = w[1] " " w[2]; n[c]++ } END { for (k in n) if (n[k] > 1) printf "%d %s\n", n[k], k }' | sort -rn | head -n 15 | sed 's/^/- /'
+	printf '\n## files edited\n'
+	printf '%s\n' "$s" | awk -F'\t' '$1 == "T" && $2 ~ /^(Edit|Write|MultiEdit|NotebookEdit)$/ && !seen[$3]++ { print "- " $3 }' | head -n 40
+	printf '\n## skills loaded or edited\n'
+	printf '%s\n' "$s" | awk -F'\t' '($1 == "T" && $2 == "Skill") || ($1 == "T" && $3 ~ /(^|\/)skills\//) { if (!seen[$3]++) print "- " $2 ": " $3 }' | head -n 30
+}
+
+todo_text() {
+	cat << 'EOF'
+
+## what to do with it
+
+Make skills of it in the factory's own folder, skills/factory/ (his skills elsewhere are not edited): for every lasting
+correction, wish, procedure that repeated and tool knowledge found the hard way, a skill `factory-NAME/SKILL.md` -
+the header standard of skill-everything, priority 2, `#factory` among its tags, the rule, the why in his words with
+the date, one real example, and the session it came from. A lesson that fits a factory skill already there is added to
+it (`ls skills/factory/`, `rg -i WORD skills/factory/`). A one-off makes no skill. `bin/skills check && bin/skills
+index`, commit, then `skills factory done SID "what came of it"` ("nothing" when the session held nothing lasting).
+EOF
+}
+
+case ${1:-} in
+queue)
+	[ $# -ge 2 ] || die "queue TRANSCRIPT [SID] [CWD]"
+	[ -f "$2" ] || exit 1
+	sid=$(printf '%s' "${3:-$(date +%s)}" | tr -cd 'A-Za-z0-9_-')
+	[ "$(stream "$2" | grep -c '^U	')" -ge "$min" ] || exit 0
+	mkdir -p "$q" || exit 1
+	digest "$2" "$sid" "${4:-?}" > "$q/$sid.md"
+	exit 0 ;;
+list)
+	found=0
+	for f in "$q"/*.md; do
+		[ -f "$f" ] || continue
+		found=1
+		printf '%s\t%s\n' "$(basename "$f" .md)" "$(sed -n 3p "$f")"
+	done
+	[ "$found" -eq 1 ] || exit 1
+	exit 0 ;;
+next)
+	f=$(ls -tr "$q"/*.md 2> /dev/null | head -n 1)
+	[ -n "$f" ] || { echo "skills factory: no session waiting" >&2; exit 1; }
+	cat -- "$f"
+	todo_text | sed "s/SID/$(basename "$f" .md)/"
+	exit 0 ;;
+digest)
+	[ $# -eq 2 ] && [ -f "$2" ] || die "digest TRANSCRIPT"
+	digest "$2"
+	exit 0 ;;
+done)
+	[ $# -ge 2 ] || die "done SID [WHAT]"
+	sid=$(printf '%s' "$2" | tr -cd 'A-Za-z0-9_-')
+	[ -f "$q/$sid.md" ] || { echo "skills factory: no waiting session $sid" >&2; exit 1; }
+	mkdir -p "$q/done" || exit 1
+	printf '\n## done %s: %s\n' "$(date '+%F %T')" "${3:-?}" >> "$q/$sid.md"
+	mv -n -- "$q/$sid.md" "$q/done/$sid.md"
+	exit 0 ;;
+-h | --help | '')
+	usage
+	[ $# -eq 0 ] && exit 2
+	exit 0 ;;
+*)
+	usage >&2
+	exit 2 ;;
+esac

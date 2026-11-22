@@ -1,0 +1,8 @@
+# a reply to a plain question: answer first, no greeting or closer
+prompt
+Which flag makes `rg` print only file names?
+expect
+-l
+forbid
+^(sure|certainly|great question|of course)
+hope this helps

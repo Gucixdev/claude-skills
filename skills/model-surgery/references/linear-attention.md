@@ -10,7 +10,7 @@ LoLCATs checked against its README on 2026-11-15; other numbers marked UNSURE ar
 - **Linear attention**: replace softmax(QKᵀ)V with φ(Q)(φ(K)ᵀV), φ a feature map; the state S = Σ φ(k)vᵀ is a matrix of fixed size per head.
 - **DeltaNet**: the state is *edited* instead of only added to: S_t = S_{t-1}(I − β_t k_t k_tᵀ) + β_t v_t k_tᵀ (delta rule: overwrite what the key currently retrieves). Recalls better than plain linear attention.
 - **Gated DeltaNet**: adds a decay gate on S (forgetting). Used in production hybrids, e.g. Qwen3-Next mixes it with ordinary attention layers (about 3 linear layers per 1 full-attention layer, UNSURE of exact ratio).
-- Kernels live in the `flash-linear-attention` library (fla-org/flash-linear-attention); do not write the chunked scan by hand unless you must.
+- Kernels live in the `flash-linear-attention` library (fla-org/flash-linear-attention); do not write the chunked scan by hand unless you must. The ashagent repo has its own `gdn.py`.
 
 ## Recipes (from the literature)
 
@@ -33,7 +33,7 @@ Its own repo does the whole thing in one command per model: `python distill_llam
 6. Evaluate: perplexity before/after, needle test at 2×, 4×, 8× the training length, generation check ([SKILL.md](../SKILL.md)). Linear layers can read *longer* than they trained on; confirm, do not assume.
 7. Report the memory at your longest context: the KV cache is replaced by a fixed state, so measure real VRAM, do not compute it from the formula only.
 
-## A small machine
+## This machine
 
 Inference of a converted model fits easily (small state). Training does not: do steps 3-5 on a rented GPU and bring
 back the weights. llama.cpp supports some ready-made linear/hybrid architectures (Mamba, RWKV, Qwen3-Next family, UNSURE which versions): a *new* converted

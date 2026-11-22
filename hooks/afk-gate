@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# afk-gate - Claude Code Stop hook for "I am away, keep working": when he has not typed anything for N minutes,
+# Claude cannot end its turn; the hook hands back the next open line of todo.md and Claude carries on. Text in a
+# skill cannot do this (a model can always decide to stop), a hook can.
+#
+#   afk-gate auto [IDLE]     switch on, idle detected: IDLE like 10m (default) is how long he must be quiet
+#   afk-gate on [DURATION]   force: block every stop for DURATION (default 8h), however recently he typed
+#   afk-gate off             switch both off (also what he types as "! afk-gate off" when he is back)
+#   afk-gate status          mode, idle limit, time left, blocked stops so far
+#
+# As the hook (no arguments, the Stop event's JSON on stdin): with neither mode on, expired or past the cap - exit 0,
+# Claude may stop. In auto mode the hook looks at the transcript (path in the JSON): the last entry written by a
+# human (origin.kind "human"; task notifications, hand-backs and tool results do not count) gives the idle time.
+# Idle already at the limit: the stop is blocked. Not yet: the hook waits (poll every AFK_GATE_POLL=5 s, at most
+# AFK_GATE_WAIT=1700 s, the hook timeout in settings.json must be longer) until the limit is reached, then blocks; a
+# new message from him in the meantime ends the wait with exit 0. A stop that is blocked is counted and exit 2 sends
+# Claude back to work with the first open item of todo.md. The cap (default 300 blocked stops, AFK_GATE_MAX) is the
+# brake against a loop that makes no progress; at the cap the mode switches itself off and the reason is shown to him.
+# An item is open unless the line holds "zrobione", "done" or "blocked". No transcript, no timestamp: no block.
+# State: ${AFK_GATE_DIR:-~/.local/state/afk-gate}/{until,idle,count}. The todo file is AFK_GATE_TODO
+# (default $CLAUDE_CONFIG/todo.md). Exit status as a command: 0 fine, 2 bad usage.
+
+set -u
+
+dir=${AFK_GATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/afk-gate}
+todo=${AFK_GATE_TODO:-${CLAUDE_CONFIG:-$HOME/.claude-config}/todo.md}
+max=${AFK_GATE_MAX:-300}
+
+usage() { sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; }
+
+seconds() {	# seconds 90m|8h|45s|120 -> seconds, empty on bad input
+	case $1 in
+		*[!0-9smhd]* | '' | [smhd]*) return 1 ;;
+	esac
+	local n=${1%[smhd]} u=${1: -1}
+	case $u in
+		s) echo "$n" ;; m) echo $((n * 60)) ;; h) echo $((n * 3600)) ;; d) echo $((n * 86400)) ;; *) echo "$1" ;;
+	esac
+}
+
+left() {	# seconds until the forced mode ends, 0 when off or expired
+	local u now
+	[ -f "$dir/until" ] || { echo 0; return; }
+	u=$(cat "$dir/until") now=$(date +%s)
+	[ "$u" -gt "$now" ] 2> /dev/null && echo $((u - now)) || echo 0
+}
+
+last_human() {	# last_human TRANSCRIPT -> epoch seconds of his newest message, empty when unknown
+	local ts
+	[ -r "${1:-}" ] || return 1
+	ts=$(tail -c 4000000 "$1" | jq -R -r 'fromjson? | select(.type == "user" and .origin.kind == "human") | .timestamp' 2> /dev/null | tail -n 1)
+	[ -n "$ts" ] && date -d "$ts" +%s 2> /dev/null
+}
+
+case ${1:-} in
+auto)
+	s=$(seconds "${2:-10m}") || { echo "afk-gate: bad idle time '${2:-}' (like 10m or 90s)" >&2; exit 2; }
+	[ "$s" -gt 0 ] || { echo "afk-gate: idle time must be above zero" >&2; exit 2; }
+	mkdir -p "$dir" || exit 2
+	echo "$s" > "$dir/idle"
+	echo 0 > "$dir/count"
+	echo "afk-gate: auto, after $((s / 60)) min ($s s) of silence from you Claude cannot stop while todo.md has open lines ($todo)"
+	exit 0 ;;
+on)
+	s=$(seconds "${2:-8h}") || { echo "afk-gate: bad duration '${2:-}' (like 90m or 8h)" >&2; exit 2; }
+	mkdir -p "$dir" || exit 2
+	echo $(($(date +%s) + s)) > "$dir/until"
+	echo 0 > "$dir/count"
+	echo "afk-gate: forced for $((s / 60)) minutes; Claude cannot stop while todo.md has open lines ($todo)"
+	exit 0 ;;
+off)
+	rm -f -- "$dir/until" "$dir/idle" 2> /dev/null
+	echo "afk-gate: off"
+	exit 0 ;;
+status)
+	l=$(left)
+	c=$(cat "$dir/count" 2> /dev/null || echo 0)
+	if [ -f "$dir/idle" ]; then echo "afk-gate: auto, idle limit $(($(cat "$dir/idle") / 60)) min, $c stops blocked"
+	elif [ "$l" -gt 0 ]; then echo "afk-gate: forced, $((l / 60)) minutes left, $c stops blocked"
+	else echo "afk-gate: off"; fi
+	exit 0 ;;
+'') ;;
+*)
+	usage >&2
+	exit 2 ;;
+esac
+
+[ -t 0 ] && { usage >&2; exit 2; }
+input=$(cat)
+l=$(left)
+idle=$(cat "$dir/idle" 2> /dev/null || echo 0)
+[ "$l" -gt 0 ] || [ "$idle" -gt 0 ] || exit 0
+n=$(cat "$dir/count" 2> /dev/null || echo 0)
+if [ "$n" -ge "$max" ]; then
+	rm -f -- "$dir/until" "$dir/idle"
+	echo "afk-gate: $n stops blocked and AFK mode ran into its cap, so it is off now; Claude may stop." >&2
+	exit 1
+fi
+next=$(grep -vE '^[[:space:]]*(#|$)|zrobione|[Dd]one|[Bb]locked' "$todo" 2> /dev/null | sed -n '1p' | cut -c1-300)
+[ -n "$next" ] || exit 0	# nothing open: stopping is fine
+
+why="forced, $((l / 60)) minutes left"
+if [ "$l" -le 0 ]; then	# auto: wait for the silence to reach the limit
+	tp=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2> /dev/null)
+	seen=$(last_human "$tp") || exit 0
+	waited=0 wait=${AFK_GATE_WAIT:-1700} poll=${AFK_GATE_POLL:-5}
+	while :; do
+		quiet=$(($(date +%s) - seen))
+		[ "$quiet" -ge "$idle" ] && break
+		[ "$waited" -ge "$wait" ] && exit 0
+		sleep "$poll"
+		waited=$((waited + poll))
+		now=$(last_human "$tp") || exit 0
+		[ "$now" -gt "$seen" ] && exit 0	# he wrote: he is here
+	done
+	why="auto, you were quiet for $((quiet / 60)) minutes"
+fi
+echo $((n + 1)) > "$dir/count"
+{
+	printf 'AFK mode is on (%s). Blocked stops so far: %d (safety brake at %d). He is away and wants work to continue: do real work, do not stop, do not ask, and do not repeat that you are blocked or out of limit.\n' \
+		"$why" $((n + 1)) "$max"
+	printf 'Next open line of %s:\n  %s\n' "$todo" "$next"
+	printf 'Do it (or the next one if this one is blocked: then add one line to questions.md), verify, commit, tick it in todo.md, continue.\n'
+} >&2
+exit 2

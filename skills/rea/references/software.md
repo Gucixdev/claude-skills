@@ -1,6 +1,6 @@
 # rea (software)
 
-What: a program on the user's machine - a CLI, a GUI app, a daemon, an installer - whose behaviour you need to know or copy.
+What: a program on his machine - a CLI, a GUI app, a daemon, an installer - whose behaviour you need to know or copy.
 How: climb from the cheapest question to the dearest one and stop when the spec line is written: docs, then what it
 touches, then its code. Many questions end at rung 1.
 
@@ -36,7 +36,7 @@ Reading the trace: group by what matters, not by order. `openat(...) = -1 ENOENT
 `write` is how it saves atomically. `execve` lines are the helpers it shells out to.
 
 The GUI-is-a-front-for-a-CLI test: if the trace shows `execve("/usr/bin/flatpak", ["flatpak","override",...])` or a
-write to a plain file, a bash wrapper is the whole rewrite (`bash-everything`). The user's `flatseal` came from exactly this:
+write to a plain file, a bash wrapper is the whole rewrite (`bash-everything`). His `flatseal` came from exactly this:
 Flatseal writes `flatpak override` files.
 
 ## 2. Static: its code without running it
@@ -55,7 +55,7 @@ the references (`ghidra`). Stripped, optimised C is still readable at function l
 `scripts/DecompFunc.java`, not the whole program.
 
 Windows `.exe`/`.dll`: `file` and `objdump -x` (imports); `strings -el` for UTF-16 strings; Ghidra reads PE too.
-Running it under Wine is allowed for the user's own software only; keep it in a throwaway prefix (`WINEPREFIX=$(mktemp -d)`).
+Running it under Wine is allowed for his own software only; keep it in a throwaway prefix (`WINEPREFIX=$(mktemp -d)`).
 
 ## 3. Dynamic: the values at run time
 
@@ -127,7 +127,7 @@ resource: `strings` it, or `rcc`-style extraction.
 ## Safety
 
 Run unknown binaries only in a throwaway environment (a container, `bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs ~ PROG`, a VM): tracing
-runs the program for real, and a program you do not trust can delete files. For the user's own software on the user's own
+runs the program for real, and a program you do not trust can delete files. For his own software on his own
 machine the trace is the same as using it. Never attach to or modify a program that guards a licence or an
 anti-cheat (`rea` boundaries).
 

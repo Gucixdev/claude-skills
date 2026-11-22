@@ -12,7 +12,7 @@
 #              Slack, private keys) and name=value lines for password/token/secret/api key
 #   identity   this machine's login name, home directory, and the git name and e-mail from the global and
 #              ~/.gitconfig.local config - read at run time, so the check itself carries no personal detail
-#   paths      home-directory paths that contain a login name, and absolute paths on a mounted data disk in files (use $HOME, ~, $USER or a
+#   paths      /home/NAME, /Users/NAME and /data/dev style absolute paths in files (use $HOME, ~, $USER or a
 #              path relative to the script)
 #   filler     comment lines with the marks of generated text: emoji, "Let's", "Certainly", "robust",
 #              "seamless", "comprehensive", "leverage", "delve", "It's important to", "Note that", and the

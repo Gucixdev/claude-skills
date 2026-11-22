@@ -1,10 +1,10 @@
 # Fine-tuning (LoRA / QLoRA, and expert iteration with a verifier)
 
-## Can a small machine do it?
+## Can this machine do it?
 
-No for 8B. A 4 GB GPU cannot train an 8B even with QLoRA (weights alone are about 5 GB in 4 bits, plus
+No for 8B. A 1050 Ti with 4 GB cannot train an 8B even with QLoRA (weights alone are about 5 GB in 4 bits, plus
 activations and optimizer). A 1.5-2B QLoRA is borderline with a short context and gradient checkpointing. Realistic
-options: train a model of 1.5B or smaller locally, or rent a GPU with 16+ GB for the 8B and bring the adapter back
+options: train a model of 1.5B or smaller here, or rent a GPU with 16+ GB for the 8B and bring the adapter back
 (adapters are tens of MB).
 
 ## LoRA steps
@@ -16,7 +16,7 @@ options: train a model of 1.5B or smaller locally, or rent a GPU with 16+ GB for
    a base-dataset training diverge here.
 4. **Hyperparameters to start from**: LoRA rank 16, alpha 32, dropout 0.05, on all linear layers (q,k,v,o,gate,up,down),
    learning rate 1e-4 to 2e-4 with cosine decay and 3% warmup, 1-3 epochs, effective batch 16-64 sequences. For QLoRA
-   load the base in NF4 with double quantization, compute in bf16 (fp16 on cards without bf16 math, such as Pascal).
+   load the base in NF4 with double quantization, compute in bf16 (fp16 on Pascal, which has no bf16 math).
 5. **Hold out** 5-10% of the data and a separate eval set; stop when the held-out loss rises.
 6. **Merge the adapter** into the base in bf16 (`merge_and_unload()` in PEFT), save as safetensors, copy the tokenizer.
 7. Check with SKILL.md; compare with the base on the *same* prompts. Then quantize ([quant](quant.md)).
@@ -26,7 +26,7 @@ options: train a model of 1.5B or smaller locally, or rent a GPU with 16+ GB for
 The Lean checker gives a perfect label, so the model can make its own training data:
 
 1. Put many goals in `goals.md` (statements only).
-2. Run a proof-search harness (ask the model for proofs, let Lean check them, count the accepted ones) with the model, with a high `TRIES` and temperature; every proof Lean accepts lands in
+2. Run `symbiote/bin/freeworker (its own repo)` with the model, with a high `TRIES` and temperature; every proof Lean accepts lands in
    `Proven.lean`. Wrong proofs cost nothing, they are simply not kept.
 3. Turn each accepted (statement, proof) pair into a training example in the model's chat template.
 4. Fine-tune with LoRA on those pairs, then repeat from step 2 with the better model and the goals it failed before.

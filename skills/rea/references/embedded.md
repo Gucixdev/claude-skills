@@ -16,7 +16,7 @@ device keeps working until the last rung: non-destructive steps first, anything 
 - Hazards, written into `re/NOTES.md` before the case is opened: mains-connected parts (the live side stays closed, use an
   isolation transformer or do not power it from the wall), lithium cells (never short, never puncture, bench supply
   with a current limit instead of the cell where the board allows), charged capacitors, ESD.
-- Boundary (`rea`): the user's own devices, repair and interoperability. A device that locks its firmware (read-out protection,
+- Boundary (`rea`): his own devices, repair and interoperability. A device that locks its firmware (read-out protection,
   encrypted updates) says no to reading it: map it from outside (section 8) instead of defeating the lock with
   glitching or decapping; no cracking of someone else's security.
 
@@ -146,7 +146,7 @@ A black box is mapped by stimulus and response, and by timing:
 
 - Replay: feed the model (a Python state machine or a small C program) the same input log as a real capture; its outputs
   must match the capture in timing within the measured tolerance. Keep the capture and the replay result as a test
-  under `tests/` (`verify`, `verify (test)`).
+  under `tests/` (`code (done)`, `code (test)`).
 - Analog parts: simulate the driver or charger in `ngspice` (installed) with the measured values and compare current
   and voltage with the scope numbers.
 - Firmware: run the vector table's code in QEMU (`qemu-system-arm` is installed; its boards are limited), or in an

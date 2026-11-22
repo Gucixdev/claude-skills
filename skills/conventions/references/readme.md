@@ -4,7 +4,7 @@
 
 1. What it is, in one paragraph, for someone who has never seen it.
 2. Install, build, run: copy-paste commands, each one run before it was written down (`rules (rtfm)`).
-3. What it looks like: real output from a real run (the user's bash README shows `logcollector` and `sniff` output).
+3. What it looks like: real output from a real run (his bash README shows `logcollector` and `sniff` output).
 4. Principles and gotchas that are not visible in the code.
 5. Status: what is tested, on what, and what is not ("follows the documented syntax, not run on a live system").
 6. License.

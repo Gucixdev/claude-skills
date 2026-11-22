@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# snap-before-edit - Claude Code PreToolUse hook for Edit, Write, MultiEdit and NotebookEdit: stores the file's
+# current content with bin/versions before Claude changes it, so every change can be undone later (versions diff,
+# versions restore, versions rewind). Never blocks the edit; a file that does not exist yet has nothing to store.
+input=$(cat)
+path=''
+if command -v jq > /dev/null; then
+	path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2> /dev/null)
+elif command -v python3 > /dev/null; then
+	path=$(printf '%s' "$input" | python3 -I -c 'import json, sys
+t = json.load(sys.stdin).get("tool_input") or {}
+print(t.get("file_path") or t.get("notebook_path") or "")' 2> /dev/null)
+fi
+[ -n "$path" ] && [ -f "$path" ] || exit 0
+"$(dirname "$(readlink -f "$0")")/../bin/versions" snap "$path" > /dev/null 2>&1
+exit 0

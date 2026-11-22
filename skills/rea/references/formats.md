@@ -109,5 +109,5 @@ folder if they hold nothing personal (`spec`, `publish-anything`).
 
 `hexdump`, `od`, `cmp`, `strings`, `file` are here; `binwalk`, `hexyl` (a hex viewer with colours), `yara` are in the
 Arch repos, ImHex is in the AUR. ImHex's pattern language (`.hexpat`) turns a verified layout into a live
-overlay: write the struct, load it on a sample, and every wrong field shows up as nonsense immediately. The user's
+overlay: write the struct, load it on a sample, and every wrong field shows up as nonsense immediately. His
 Firefox `export-bookmarks` decodes `.jsonlz4` from the spec with no lz4 dependency.

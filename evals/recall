@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""recall - recall@3 and recall@5 of `skills find` against `skills retrieve` on evals/retrieval*.tsv.
+
+Each line of a file is TASK<TAB>PATH: the file whose chunk should be among the first k results (a path suffix).
+retrieval.tsv is the set the fusion weights were looked at on, retrieval-heldout.tsv was written before and not tuned on.
+usage: evals/recall [-v] [FILE...]     -v lists the misses with what came back instead
+Uses the real chunks of skills/ and no byte cap, so it measures the ranking only.
+"""
+import importlib.machinery, importlib.util, os, sys
+sys.dont_write_bytecode = True
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+BIN = os.path.join(HERE, "..", "bin")
+
+def load(name):
+    p = os.path.join(BIN, name)
+    sp = importlib.util.spec_from_loader(name, importlib.machinery.SourceFileLoader(name, p))
+    m = importlib.util.module_from_spec(sp); sys.modules[name] = m; sp.loader.exec_module(m); return m
+
+def main(argv):
+    verbose = "-v" in argv
+    files = [a for a in argv if a != "-v"]
+    paths = files or [os.path.join(HERE, "retrieval.tsv"), os.path.join(HERE, "retrieval-heldout.tsv")]
+    find, ret = load("skills-find"), load("skills-retrieve")
+    chunks = find.load_chunks(os.path.realpath(os.path.join(HERE, "..", "skills")))
+    for path in paths:
+        print(os.path.basename(path))
+        cases = [l.rstrip("\n").split("\t") for l in open(path) if l.strip() and not l.startswith("#")]
+        rankers = {
+            "find": lambda q: [i for _, i in sorted(((v, i) for i, v in enumerate(find.bm25(chunks, find.tok(q))) if v > 0), key=lambda x: -x[0])],
+            "retrieve --lexical": lambda q: [i for _, i in ret.retrieve(chunks, q, True, find)[0]],
+            "retrieve": lambda q: [i for _, i in ret.retrieve(chunks, q, False, find)[0]],
+        }
+        for name, rank in rankers.items():
+            hit3 = hit5 = 0; misses = []
+            for task, want in cases:
+                top = [chunks[i][0] for i in rank(task)[:5]]
+                ok = [p.endswith(want) for p in top]
+                hit3 += any(ok[:3]); hit5 += any(ok)
+                if not any(ok[:3]): misses.append((task, want, top[:3], any(ok)))
+            n = len(cases)
+            print(f"{name:20s} recall@3 {hit3}/{n} = {hit3 / n:.2f}   recall@5 {hit5}/{n} = {hit5 / n:.2f}")
+            if verbose:
+                for task, want, top, in5 in misses:
+                    print(f"    miss@3{' (hit@5)' if in5 else ''}: {task!r} wanted {want}; got {', '.join(top)}")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

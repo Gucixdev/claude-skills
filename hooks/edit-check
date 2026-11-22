@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# edit-check - Claude Code PostToolUse hook for Edit, Write, MultiEdit and NotebookEdit: right after a file is changed,
+# run the cheapest syntax check for its type and hand the errors straight back to Claude (exit 2 puts stderr in front of it),
+# so a broken file is fixed in the same turn instead of three tool calls later.
+# Checks: bash/sh (bash -n, shellcheck at warning level), python (compile), json (jq), node (--check), go (gofmt -e),
+# rust (rustfmt syntax), c (gcc -fsyntax-only, missing headers ignored). Anything else, a missing checker, a file under
+# references/ or a trash folder, or a pass: exit 0, nothing printed. Never blocks the edit itself (it already happened).
+# Enable (you, in settings.json): hooks.PostToolUse, matcher "Edit|Write|MultiEdit|NotebookEdit", command ~/.claude/hooks/edit-check
+input=$(cat)
+path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2> /dev/null)
+[ -n "$path" ] && [ -f "$path" ] || exit 0
+case $path in */references/* | */trash/* | */.git/* | */node_modules/* | */target/*) exit 0 ;; esac
+
+have() { command -v "$1" > /dev/null 2>&1; }
+run() { timeout 20 "$@" 2>&1; } # one place for the time limit
+out=''
+case $path in
+*.sh | *.bash) kind='sh' ;;
+*.py) kind=py ;;
+*.json) kind=json ;;
+*.js | *.mjs | *.cjs) kind=js ;;
+*.go) kind=go ;;
+*.rs) kind=rs ;;
+*.c | *.h) kind=c ;;
+*.*) exit 0 ;;
+*) head -n 1 "$path" | grep -qE '^#!.*\b(ba)?sh\b' && kind='sh' || exit 0 ;;
+esac
+
+case $kind in
+sh)
+	out=$(run bash -n "$path") || :
+	if [ -z "$out" ] && have shellcheck; then
+		sc=$(run shellcheck -S warning -f gcc "$path") || out=$sc
+	fi ;;
+py) have python3 && { out=$(run python3 -I -c 'import sys; compile(open(sys.argv[1], "rb").read(), sys.argv[1], "exec")' "$path") || :; } ;;
+json) have jq && { out=$(run jq empty "$path") || :; } ;;
+js) have node && { out=$(run node --check "$path") || :; } ;;
+go) have gofmt && { out=$(timeout 20 gofmt -e "$path" 2>&1 > /dev/null) || :; } ;;
+rs) have rustfmt && { out=$(timeout 20 rustfmt --edition 2021 --emit stdout "$path" 2>&1 > /dev/null) || :; } ;;
+c)
+	if have gcc; then
+		c=$(run gcc -fsyntax-only -Wall -I"$(dirname "$path")" -I"$(dirname "$path")/.." "$path") || :
+		# an unknown header says nothing about this edit, so a file that only fails for that is fine
+		out=$(printf '%s\n' "$c" | grep -E 'error|warning:' | grep -vE 'No such file or directory|fatal error' || :)
+	fi ;;
+esac
+
+[ -n "$out" ] || exit 0
+printf 'edit-check: %s has problems right after this change:\n%s\n' "$path" "$(printf '%s\n' "$out" | head -n 20)" >&2
+exit 2

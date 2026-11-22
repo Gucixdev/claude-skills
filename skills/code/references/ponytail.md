@@ -1,7 +1,7 @@
 # code (ponytail)
 
 The smallest change that fully solves the task. The reply ends with one or two lines: what was skipped or not checked,
-as "skipped X - add it when Y", and any risk the user must know.
+as "skipped X - add it when Y", and any risk he must know.
 
 ## Before writing
 
@@ -33,11 +33,11 @@ for def/func/fn/class/export, or tags).
 - Counterweight: judge total complexity, clarity and ownership, not lines changed. Logic goes in the layer that owns
   the invariant; a coherent wider change beats a cramped patch or a duplicated guard. A new dependency or public
   surface is fine when it is the right design or cheaper to live with - say the tradeoff.
-- Bug fix: grep every caller first; fix the root cause once, in the shared code. When the user's own tooling has the limit
-  that causes the pain (no "this file's directory" in the project's make, so paths broke on every move), add the feature
-  to the tool instead of patching around it again.
+- Bug fix: grep every caller first; fix the root cause once, in the shared code. When his own tooling has the limit
+  that causes the pain (no "this file's directory" in his make, so paths broke on every move), add the feature to the
+  tool instead of patching around it again - his correction on 2026-08-14.
 - Don't break userland: a rename, merge or replacement keeps the old interface reachable (an alias, the old flag, the
-  old exit code) unless the user decides otherwise. Surface the conflict instead of picking a side silently.
+  old exit code) unless he decides otherwise. Surface the conflict instead of picking a side silently.
 - Moved or merged code keeps its error handling and validation. Between options of the same size, take the one right
   on edge cases.
 - Comment only the why the code cannot show, in one line. Little nesting, no boolean tangles, meaningful names.
@@ -47,13 +47,27 @@ for def/func/fn/class/export, or tags).
   `code (ponytail)`).
 - Never cut: validation at trust boundaries, authorization, security, error handling that prevents data loss,
   accessibility, migration and rollback safety, concurrency protection, compatibility, required tests, the calibration
-  real hardware needs, anything the user asked for.
-- Secrets live in a gitignored env file (`~/.secrets`), never in code, never printed whole.
+  real hardware needs, anything he asked for.
+- Secrets live in a gitignored env file (`~/.secrets` on his machine), never in code, never printed whole.
 - Ask only about material choices: public interfaces, security, data, money, things hard to reverse.
 - Run the smallest proof that is enough. Report material changes, the proof, open risks. Stop when the task is
   satisfied. Never quote a saving: the code that was not written has no baseline.
-- Levels when the user names one: lite - build what was asked, offer the smaller option in one line; full - these rules,
+- Levels when he names one: lite - build what was asked, offer the smaller option in one line; full - these rules,
   the default; ultra - also question the request and push back on any part the need doesn't justify, before building.
+
+## 80/20 and minmax
+
+- 80/20 first: the fifth of the work that gives four fifths of the value goes first, and conventions cover the common
+  80% so configuration is only for the rest (convention over configuration). The rest of a task is named, not dropped
+  silently.
+- "Minmax it" (his words, 2026-11-19) is the gamer's sense: pick the few numbers the work is judged by, push them to
+  the max, and cut to the minimum whatever costs without moving them. Not minimax (game theory) nor min-max
+  normalisation, unless he says so.
+  1. Name the axes before touching code - he names them, or the task implies them (a store: max queries/s, recall per
+     byte, rows per TB; min RAM a row, bytes read a query, p99, binary size, code paths) - and say which were taken.
+  2. Measure before and after every change, on the hardware it is for; a change that moves no chosen number is
+     reverted (deletion beats addition). Spend where the profile points, not where it feels slow.
+  3. Never buy a number with what "Never cut" protects, nor with honesty: report the numbers as measured.
 
 ## Not adopted, on purpose
 
@@ -65,11 +79,16 @@ map - done by hand above), the gain scoreboard.
 Code that will be wanted again goes in a reusable block from the first day, in the stb style: one file, no dependency
 beyond the standard library, public API at the top with a header comment that is also the docs, state in a struct the
 caller owns (no globals), no build system needed to use it (C: one header with `#define NAME_IMPLEMENTATION` in one
-file; bash/Python: one file that works as a command and as a library). Before writing, search the user's other projects for the
-block (`rg -n` across `~/dev`) and reuse or lift it; when copying between projects, copy the file
-whole and keep one source (a vendor script that copies the shared file in), never edit two diverging copies. A function that
+file; bash/Python: one file that works as a command and as a library). Before writing, search his other projects for the
+block (`rg -n` across `~/dev`, holyc's headers first) and reuse or lift it; when copying between projects, copy the file
+whole and keep one source (a vendor script, as lazytui.sh is vendored), never edit two diverging copies. A function that
 two projects need is moved to the shared block the second time it is needed, not the first (ponytail: no abstraction
 for a single use).
+
+A single file that needs settings keeps staying one file: the settings go in a second header next to it, named
+`NAME_config.h` (`netman_config.h`), nothing but `#define`s with defaults in the program so it builds without it
+(`#ifdef` / `__has_include`); the user edits that header and recompiles, as in suckless. No config parser, no config
+folder (convention over configuration).
 
 ## Audit a whole repo
 
@@ -94,7 +113,7 @@ skipped; end with `N markers, M with no trigger.` or "No shortcut debt."
 Pick the mode before the first edit; `code (ponytail)` decides how small the change is.
 
 - Bug or small behaviour change - surgical patch. Reproduce first when cheap, else take the strongest evidence; change
-  the narrowest layer that owns the wrong behaviour; no cleanup, renaming or abstraction outside the fix; keep the user's own
+  the narrowest layer that owns the wrong behaviour; no cleanup, renaming or abstraction outside the fix; keep his own
   changes; one regression check, run it plus the nearest affected gate.
 - Restructuring - safe refactor. Fix the behaviour boundary and the check before touching structure; no feature changes
   inside; one ownership move at a time; keep interfaces, failure behaviour, ordering and compatibility; every step
@@ -104,18 +123,18 @@ Pick the mode before the first edit; `code (ponytail)` decides how small the cha
 - Schema, data, API, config or dependency change - migration. Map readers, writers, data shape and the compatibility
   window first; a forward and a rollback path; existing data kept, destructive steps explicit and separately approved;
   expand, migrate, verify, then contract; retries idempotent; never do the destructive step implicitly.
-  For setup repos (dotfiles, tools) when an update must change state on machines already set up (a renamed
+  For his setup repos (dotfiles, bash tools) when an update must change state on machines already set up (a renamed
   path, a moved config): omarchy's pattern - `migrations/<unix-time>.sh`, run once per user by a `migrate` command that
   records each done one in `~/.local/state/APP/migrations/`, `--pending` to list, idempotent, never run silently.
-- Unknown cause: investigate first (`code (thinking)`). Checking finished work: `verify`.
+- Unknown cause: investigate first (`code (thinking)`). Checking finished work: `code (done)`.
 
 ## Review a change as a report
 
-A review is a report: findings only, no code changed, unless the user asks for the fixes too.
+A review is a report: findings only, no code changed, unless he asks for the fixes too.
 
 ### Understand first
 
-- Review: what the user names (staged, uncommitted, a branch, a PR), else the uncommitted changes, else the last commit.
+- Review: what he names (staged, uncommitted, a branch, a PR), else the uncommitted changes, else the last commit.
   Read the diff, then the touched code - callers of changed functions, what they call, tests, README. A changed
   signature or behaviour means grep every caller.
 - Find the expected load (one person's script or many users) and say which load was assumed.

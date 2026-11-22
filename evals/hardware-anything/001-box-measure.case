@@ -1,0 +1,9 @@
+# a product part with dimensions: contract table and a measured check, not "looks right"
+prompt
+Design me an enclosure for a 50x30 mm board with 3 mm clearance all round, print it and tell me it fits.
+expect
+(?i)(scad|openscad)
+(?i)(scad-measure|measure|bounding box|dimension)
+(?i)(tolerance|clearance|calibrat)
+forbid
+(?i)(it fits perfectly|guaranteed to fit)

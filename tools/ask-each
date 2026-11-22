@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# ask-each - one trivial question to every provider that openapi reports as ready, one after another; prints a table
+# (provider, ok/skip/FAIL, seconds, the model that answered, first words). Proves the keys and endpoints really work.
+# Usage: ask-each [PROVIDER...]   no arguments = every provider whose status is "ready"
+# Env: OPENAPI (command, default: openapi if on PATH, else `uv run <repo>/src/openapi.py`), ASK_TIMEOUT (seconds per
+# provider, default 60). The question is arithmetic with one right answer, so an answer is checked, not just received.
+# Sends only the question below to the providers, nothing from his files. Exit 1 when any provider failed.
+set -u
+q='What is 17 times 23? Reply with the number only.'
+want=391
+to=${ASK_TIMEOUT:-60}
+if [ -n "${OPENAPI:-}" ]; then oa=$OPENAPI
+elif command -v openapi > /dev/null; then oa=openapi
+else oa="uv run ${OPENAPI_DIR:-$HOME/dev/openapi}/src/openapi.py"; fi
+if [ $# -gt 0 ]; then list=("$@")
+else mapfile -t list < <($oa status 2> /dev/null | awk '$2 == "ready" {print $1}'); fi
+[ ${#list[@]} -gt 0 ] || { echo "ask-each: no ready providers" >&2; exit 2; }
+fail=0
+printf '%-14s %-5s %6s  %s\n' provider result sec 'model / answer'
+for p in "${list[@]}"; do
+	t0=$(date +%s.%N)
+	out=$(timeout "$to" $oa ask "$q" -m "$p" --max-tokens 300 2>&1) || true
+	sec=$(awk -v a="$t0" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1f", b-a}')
+	first=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-90)
+	if printf '%s' "$out" | grep -q "$want"; then r=ok          # an answer cut by the token cap still counts when it holds the number
+	elif printf '%s' "$out" | grep -q 'unreachable'; then r=skip  # a local server that is not running is not a broken key
+	else r=FAIL; fail=$((fail + 1)); fi
+	printf '%-14s %-5s %6s  %s\n' "$p" "$r" "$sec" "$first"
+done
+echo "ask-each: $fail failed of ${#list[@]} (skip = local server not running)"
+[ $fail -eq 0 ]

@@ -14,7 +14,7 @@ Before starting: the teacher's licence/terms must allow training on its output (
 ## Sequence-level (works across any pair of models)
 
 1. Prompts: the real distribution of use, deduplicated, plus a held-out set the student never sees.
-2. Generate with the teacher (greedy, or temperature 0.7 and 2-4 samples per prompt). Use a hosted API or the local server; write the prompt, answer and teacher id as JSONL.
+2. Generate with the teacher (greedy, or temperature 0.7 and 2-4 samples per prompt). Use `openapi ask` / the local server; write the prompt, answer and teacher id as JSONL.
 3. **Filter**: drop empty, truncated (`finish_reason=length`), looping, wrong-language and refusal answers; if you have a checker, drop everything it rejects. Quality over quantity: a few thousand good pairs beat 100k noisy ones.
 4. Format in the *student's* chat template with its stop token ([finetune](finetune.md) steps 2-3), loss on the answer only.
 5. Train (LoRA first). Compare with the student before training and with the teacher, on the held-out prompts ([SKILL.md](../SKILL.md) check). The student reaching the teacher on your task, not on benchmarks, is the goal.

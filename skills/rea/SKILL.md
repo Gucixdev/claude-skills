@@ -1,6 +1,6 @@
 ---
 name: rea
-description: Reverse engineer everything - find out how a program, file format, protocol, API, GUI app or game asset actually works (black box first, then static, then dynamic) and how it feels (the vibe - look, motion, game feel and sound measured into numbers), write the findings down as a spec, and only then rewrite, wrap or recreate it. Toolbox per target - physical parts and boards (to CAD), ELF binaries, file formats, network traffic, D-Bus and GUI apps, web apps, Python, Java, .NET, Electron, Godot packs, screen and game captures. Parts in references/ - ghidra, software, hardware, embedded, formats, network, web, games, vibe, spec, lean (the former leanrea). Use for "how does X work", "make it feel like X", interoperability, rewriting an app, or an undocumented format.
+description: Reverse engineer anything - how a program, file format, protocol, API, GUI, board or game asset works (black box, static, dynamic) and how it feels (look, motion, game feel, sound as numbers); findings go into a spec before any rewrite. Targets in references/. Use for how does X work, make it feel like X, interoperability, undocumented formats.
 metadata:
   priority: "2"
   tags: "#thirdparties #reverse-engineering #binaries #formats #protocols #hardware #security #ui #gamedev #leanctx #context #tokens #dev"
@@ -10,13 +10,13 @@ metadata:
 # rea
 
 Goal: understand it well enough to write it down, so a clean reimplementation or a wrapper can be built on the spec,
-not on copied code. The user's `flatseal` (bash) came from knowing what Flatseal actually writes: `flatpak override` files.
+not on copied code. His `flatseal` (bash) came from knowing what Flatseal actually writes: `flatpak override` files.
 
 ## Boundaries
 
-Fine: the user's own files and devices, interoperability (EU and UK law allow decompiling for it), formats and protocols for
-data the user owns, learning, CTFs, security review of software the user runs. Not: cracking licenses or DRM, defeating
-anti-cheat, exploits against systems that aren't the user's, redistributing someone's code. The output is a spec plus the user's own
+Fine: his own files and devices, interoperability (EU and UK law allow decompiling for it), formats and protocols for
+data he owns, learning, CTFs, security review of software he runs. Not: cracking licenses or DRM, defeating
+anti-cheat, exploits against systems that aren't his, redistributing someone's code. The output is a spec plus his own
 code.
 
 ## What and how, by target
@@ -30,7 +30,7 @@ Pick the row, run the first move, then open the part.
 | An undocumented file | two samples that differ in one setting, `scripts/fieldscan A B` | `formats` | `docs/FORMAT.md` plus a reader and writer |
 | How a device or app talks on the network | `ss -tupn`, one capture per action | `network` | `docs/PROTOCOL.md` plus a client |
 | The API behind a website | HAR of one action, `scripts/har-endpoints` | `web` | `docs/API.md` plus a client |
-| A game's data, saves, constants | engine from the files, unpack, read scripts and tables | `games` | tables and numbers in the user's own code |
+| A game's data, saves, constants | engine from the files, unpack, read scripts and tables | `games` | tables and numbers in his own code |
 | A part | calipers or photos | `hardware` | parametric CAD |
 | An embedded product (toothbrush, remote, sensor) | behaviour table, chips, netlist, measure, decode, firmware if open | `embedded` | a verified model: block diagram, netlist, signal catalogue; a board only after that |
 | How something feels | measure the real thing frame by frame | `vibe` | constants: spring, gravity, easing, loudness |
@@ -56,6 +56,7 @@ file.
 Read the part when the target matches; `lean` always.
 
 - [lean](references/lean.md) - Lean reverse engineering on a budget (the former skill leanrea) - one written question, the cheapest step, dumps to files, probes as scripts, `re/NOTES.md`, stop when the spec line is written and checked.
+- [levers](references/levers.md) - The techniques that save the most hours, ranked - the original as an oracle (differential testing), rr record and replay, tracing before reading (strace, uftrace, frida, bpftrace, apitrace), Kaitai Struct for formats, matching library code instead of reading it, symbolic execution and emulation for one function, a model as note-taker only. Read first when a target looks big.
 - [software](references/software.md) - Programs and apps: pick the rung, black box (strace, inotify, env switches), static (nm, strings, Ghidra), dynamic (ltrace, gdb, LD_PRELOAD shim), D-Bus and Flatpak, Python/Java/.NET/Electron/WASM, safety.
 - [ghidra](references/ghidra.md) - Ghidra headless: analyzeHeadless, `scripts/DecompFunc.java` for one function at a time, reading decompiled code.
 - [hardware](references/hardware.md) - Physical parts to parametric CAD (calipers, tolerances, OpenSCAD/FreeCAD, test fits), circuit boards to KiCad, firmware and device buses; `examples/bracket.scad`.

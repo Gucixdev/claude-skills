@@ -11,15 +11,15 @@
 
 ## Look
 
-Personal projects: the look set in `ui (ui-designer)`. Client sites: plain
+His own projects: dark background, green text, monospace or bitmap-looking fonts (`ui (ui-designer)`). Client sites: plain
 and readable; system font stack; one accent colour. Mobile works at 360px width with no horizontal scroll.
 
 ## Server, when there is one
 
 - Nothing dynamic: no server - static hosting (GitHub Pages, Cloudflare Pages; free tiers change, check them).
 - Small dynamic service: one static Go binary (`net/http`, `html/template`, SQLite) behind Caddy (automatic TLS).
-- CRUD with accounts and payments: framework auth, a hosted checkout, SQLite to start.
-- A box at home instead of a host: a tunnel (cloudflared) so no port opens on the home router.
+- CRUD with accounts and payments: `code (saas)`.
+- His own box instead of a host: a tunnel (cloudflared) so no port opens at home.
 
 ## Must have
 
@@ -31,5 +31,5 @@ and readable; system font stack; one accent colour. Mobile works at 360px width 
 
 ## Test
 
-`curl -sI URL` for headers and redirects; flows through the user's browser with a devtools MCP or Playwright in a
-scratch project; the HTML validator (`vnu`) when installed; a look at 360px and at full width.
+`curl -sI URL` for headers and redirects; flows through his Firefox with `firefox-devtools-mcp` or Playwright in a
+scratch project (`machine (browsers)`); the HTML validator (`vnu`) when installed; a look at 360px and at full width.

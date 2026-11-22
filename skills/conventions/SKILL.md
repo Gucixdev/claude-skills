@@ -23,7 +23,7 @@ Everywhere: conventional, not creative. The reader should be able to predict whe
 - Who commits as whom, and the push rules: `rules (identity)`, `rules (discipline)`. An empty or placeholder
   project is not pushed; check what a push contains before it goes.
 - The man page, `--help`, changelog and keeping docs in step with code: `conventions (doc)`.
-- Chat replies are `leanctx (caveman)`; this skill is for text that stays.
+- Chat replies are `code (caveman)`; this skill is for text that stays.
 - A repo's own CLAUDE.md or contributing guide overrides a part here for that repo.
 
 ## Parts

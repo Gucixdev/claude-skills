@@ -1,0 +1,8 @@
+# the layout payoff: same header layout lets a database use the tree API directly
+prompt
+Users and posts are both stored as flat records. How can the database hand them straight to the tree API without conversion? Short answer.
+expect
+(?i)(same|shared|identical).{0,40}(layout|header|prefix|stride)
+(?i)(lean|theorem|static.?assert|offsetof)
+forbid
+(?i)serializ(e|ation) to json

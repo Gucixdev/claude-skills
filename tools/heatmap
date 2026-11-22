@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# heatmap - when you and Claude work: weekday x hour grids and a per-month table, read from the session
+# transcripts (~/.claude/projects/*/*.jsonl). Local time. Nothing is written or sent anywhere.
+#
+#   tools/heatmap            your prompts and Claude's replies, all projects
+#   tools/heatmap -p NAME    only projects whose folder name contains NAME
+#   tools/heatmap -d DAYS    only the last DAYS days
+#   tools/heatmap -h         this text
+#
+# "prompt" = a message you typed (origin.kind human), "reply" = one assistant message. Cells are shaded by
+# share of the busiest cell; the number is the count. Exit 2 on bad usage, 1 when no transcript is found.
+set -eu
+root=${CLAUDE_PROJECTS:-$HOME/.claude/projects}
+proj="" days=0
+while getopts hp:d: o; do
+	case $o in
+		p) proj=$OPTARG ;;
+		d) case $OPTARG in *[!0-9]* | '') echo "heatmap: -d takes a number of days" >&2; exit 2 ;; esac; days=$OPTARG ;;
+		h) sed -n '2,/^set/{/^set/!s/^# \{0,1\}//p}' "$0"; exit 0 ;;
+		*) echo "usage: heatmap [-p NAME] [-d DAYS]" >&2; exit 2 ;;
+	esac
+done
+command -v jq > /dev/null || { echo "heatmap: jq is needed" >&2; exit 2; }
+
+files=$(find "$root" -maxdepth 2 -name '*.jsonl' -path "*$proj*" 2> /dev/null) || true
+[ -n "$files" ] || { echo "heatmap: no transcripts under $root" >&2; exit 1; }
+since=0
+[ "$days" -gt 0 ] && since=$(($(date +%s) - days * 86400))
+
+# one line per message: KIND WEEKDAY(1=Mon) HOUR YYYY-MM
+# shellcheck disable=SC2086
+data=$(cat $files | jq -r --argjson since "$since" '
+	select(.timestamp != null and (.type == "user" or .type == "assistant"))
+	| select(.type == "assistant" or .origin.kind == "human")
+	| (.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) as $t
+	| select($t >= $since)
+	| [(if .type == "user" then "prompt" else "reply" end), ($t | localtime | strftime("%u %H %Y-%m"))] | join(" ")' 2> /dev/null)
+[ -n "$data" ] || { echo "heatmap: no messages in range" >&2; exit 1; }
+
+printf '%s\n' "$data" | awk -v color="$([ -t 1 ] && echo 1 || echo 0)" '
+function shade(v, max,   r) {
+	if (!color) return sprintf("%4d", v)
+	r = max ? v / max : 0
+	return sprintf("\033[48;5;%dm%4d\033[0m", (v == 0 ? 236 : r < .25 ? 22 : r < .5 ? 28 : r < .75 ? 34 : 46), v)
+}
+{ k = $1; g[k, $2, $3 + 0]++; tot[k]++; m[k, $4]++; months[$4] = 1
+  if (g[k, $2, $3 + 0] > mx[k]) mx[k] = g[k, $2, $3 + 0] }
+END {
+	split("Mon Tue Wed Thu Fri Sat Sun", dn, " ")
+	n = split("prompt reply", kinds, " ")
+	for (ki = 1; ki <= n; ki++) {
+		k = kinds[ki]
+		printf "\n%s (%d)\n     ", (k == "prompt" ? "prompts" : "replies"), tot[k]
+		for (h = 0; h < 24; h++) printf "%4d", h
+		printf "\n"
+		for (d = 1; d <= 7; d++) {
+			printf "%s  ", dn[d]
+			for (h = 0; h < 24; h++) printf "%s", shade(g[k, d, h], mx[k])
+			printf "\n"
+		}
+	}
+	printf "\nper month   prompts   replies\n"
+	c = 0
+	for (x in months) ms[++c] = x
+	for (i = 1; i <= c; i++) for (j = i + 1; j <= c; j++) if (ms[j] < ms[i]) { t = ms[i]; ms[i] = ms[j]; ms[j] = t }
+	for (i = 1; i <= c; i++) printf "%s  %8d  %8d\n", ms[i], m["prompt", ms[i]], m["reply", ms[i]]
+}'

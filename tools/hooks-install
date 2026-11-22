@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# hooks-install - make the hooks of this repo live: link hooks/ into ~/.claude/hooks and copy the "hooks" section of
+# config/settings.json into ~/.claude/settings.json (everything else in the live file stays as it is).
+#
+# Why a script he runs himself: a hook changes what Claude may do (no-rm, the Stop gates), so Claude does not edit
+# that part of its own settings. Run it with "! tools/hooks-install" in a session or in a terminal.
+#
+# usage: hooks-install [-n]
+#   -n   show what would change, change nothing
+# The old settings.json is kept as settings.json.bak-DATE. Exit 0 done, 1 failed, 2 bad usage.
+
+case ${1:-} in -h | --help) awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;; esac
+dry=0
+case ${1:-} in -n) dry=1 ;; '') ;; *) echo "hooks-install: unknown option $1 (see --help)" >&2; exit 2 ;; esac
+command -v jq > /dev/null || { echo "hooks-install: jq is needed" >&2; exit 1; }
+
+repo=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+live=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+[ -f "$repo/config/settings.json" ] || { echo "hooks-install: no $repo/config/settings.json" >&2; exit 1; }
+
+merged=$(jq --slurpfile src "$repo/config/settings.json" '.hooks = $src[0].hooks' "$live/settings.json") || exit 1
+echo "hooks in the repo config: $(jq -r '.hooks | to_entries | map(.key + " x" + (.value | length | tostring)) | join(", ")' "$repo/config/settings.json")"
+echo "live hooks now: $(jq -r '(.hooks // {}) | keys | join(", ") | if . == "" then "none" else . end' "$live/settings.json")"
+[ "$dry" = 1 ] && { echo "dry run: nothing changed"; exit 0; }
+
+if [ -L "$live/hooks" ] || [ ! -e "$live/hooks" ]; then
+	ln -sfn "$repo/hooks" "$live/hooks" || exit 1
+	echo "linked $live/hooks -> $repo/hooks"
+else
+	echo "hooks-install: $live/hooks exists and is not a link; move it aside first" >&2
+	exit 1
+fi
+cp -- "$live/settings.json" "$live/settings.json.bak-$(date +%Y%m%d-%H%M%S)" || exit 1
+printf '%s\n' "$merged" > "$live/settings.json.new" && mv -- "$live/settings.json.new" "$live/settings.json" || exit 1
+echo "settings.json updated; start a new session (or /hooks) to load them"

@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# session-start - Claude Code SessionStart hook: what a new session should know before its first reply, printed to
+# stdout, which SessionStart puts into Claude's context. Text in a skill cannot make this happen at the start, a hook can.
+#
+#   1. the top open line of todo.md (as afk-gate picks it: not done, not blocked)
+#   2. lines of questions.md he answered since the last session start (changed lines with ODPOWIEDZ / answer)
+#   3. the repos under SESSION_REPOS with uncommitted changes, and how many files
+#   4. the priority-0 skills from skills/claude/SKILL.md
+#   5. finished sessions waiting in the skill factory (bin/skills-factory) to be turned into skills
+#
+# It also stores, for end-session-gate, when the session began and which files were already uncommitted then (his
+# changes, never counted as Claude's). Never blocks, prints nothing when there is nothing to say for a part.
+# Settings: SESSION_CONFIG_DIR (default $CLAUDE_CONFIG), SESSION_REPOS (default ~/dev),
+# SESSION_GATE_DIR (default ${XDG_STATE_HOME:-~/.local/state}/session-gate). Needs jq for the session id (without it,
+# only parts 1-4). Enable (you, in settings.json): hooks.SessionStart, command ~/.claude/hooks/session-start.
+
+set -u
+
+cfg=${SESSION_CONFIG_DIR:-${CLAUDE_CONFIG:-$HOME/.claude-config}}
+repos=${SESSION_REPOS:-$HOME/dev}
+state=${SESSION_GATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/session-gate}
+
+input=
+[ -t 0 ] || input=$(cat)
+sid=
+command -v jq > /dev/null 2>&1 && sid=$(printf '%s' "$input" | jq -r '.session_id // empty' 2> /dev/null | tr -cd 'A-Za-z0-9_-')
+mkdir -p "$state" 2> /dev/null || exit 0
+
+dirty_repos=$(
+	for d in "$repos"/*/; do
+		d=${d%/}
+		[ -d "$d/.git" ] || continue
+		n=$(git -C "$d" status --porcelain 2> /dev/null | wc -l)
+		[ "$n" -gt 0 ] && printf '%s\t%s\n' "$d" "$n"
+	done
+)
+
+if [ -n "$sid" ]; then	# for end-session-gate: the start, and what was his before Claude touched anything
+	date +%s > "$state/start.$sid"
+	: > "$state/dirty.$sid"
+	printf '%s\n' "$dirty_repos" | while IFS=$'\t' read -r d _; do
+		[ -n "$d" ] || continue
+		git -C "$d" status --porcelain 2> /dev/null | cut -c4- | sed "s|^|$d/|" >> "$state/dirty.$sid"
+	done
+fi
+
+next=
+[ -f "$cfg/todo.md" ] && next=$(grep -vE '^[[:space:]]*(#|$)|zrobione|[Dd]one|[Bb]locked' "$cfg/todo.md" | sed -n '1p' | cut -c1-300)
+answered=
+if [ -f "$cfg/questions.md" ]; then
+	[ -f "$state/questions.last" ] &&
+		answered=$(diff "$state/questions.last" "$cfg/questions.md" | sed -n 's/^> //p' | grep -iE 'odpowied|answer' | cut -c1-300 | head -n 10)
+	cp -- "$cfg/questions.md" "$state/questions.last" 2> /dev/null
+fi
+skills=
+[ -f "$cfg/skills/claude/SKILL.md" ] &&
+	skills=$(awk '/^### Priority 0/ { f = 1; next } /^### / { f = 0 } f && /^- / { sub(/ #.*/, ""); sub(/^- /, ""); printf "%s ", $0 }' "$cfg/skills/claude/SKILL.md")
+
+printf 'session-start (%s):\n' "$(date '+%F %T')"
+[ -n "$next" ] && printf 'Top open line of todo.md: %s\n' "$next"
+[ -n "$answered" ] && printf 'Answered in questions.md since the last session:\n%s\n' "$(printf '%s\n' "$answered" | sed 's/^/  /')"
+[ -n "$dirty_repos" ] && printf 'Repos with uncommitted changes (his unless you made them):\n%s\n' \
+	"$(printf '%s\n' "$dirty_repos" | head -n 30 | awk -F'\t' '{ n = split($1, p, "/"); printf "  %s: %s files\n", p[n], $2 }')"
+[ -n "$skills" ] && printf 'Load the priority-0 skills now: %s\n' "$skills"
+waiting=$(find "$state/factory" -maxdepth 1 -name '*.md' 2> /dev/null | wc -l)
+[ "$waiting" -gt 0 ] && printf 'Skill factory: %d finished sessions wait to become skills. Before other work, take each with `%s/bin/skills factory next`, turn it into skills in skills/factory/ (factory-NAME/SKILL.md), commit, then `skills factory done SID "what came of it"`.\n' "$waiting" "$cfg"
+exit 0

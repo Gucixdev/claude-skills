@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# skills-eval - does a skill change what a model does? Same tasks with the skill in the system prompt and without it.
+#
+# Cases live in evals/NAME/*.case. A case is plain text; a line that is exactly "prompt", "expect" or "forbid" starts a
+# section, "#" lines are comments:
+#     prompt
+#     Write the commit message for a bug fix in parser.c.
+#     expect              <- every line is an extended regex the answer must match (case-insensitive)
+#     ^fix\(parser\): 
+#     forbid              <- every line is a regex the answer must NOT match
+#     Sure
+# Per skill it prints "with skill N/M, without K/M, lift +D" and the failing case names. The skill's text is its SKILL.md
+# without the header. Greedy and one try per case; a small model is noisy, so read a lift of one case as noise.
+#
+# usage: skills-eval [options] [NAME...]        (no NAME = every skill that has cases)
+#   -b KIND   openai (default; any OpenAI-compatible server: llama-server, ollama /v1, vLLM), claude (the claude CLI, -p),
+#             cmd (your own command, see -c)
+#   -u URL    openai base, default $EVAL_URL or http://localhost:8080/v1
+#   -m MODEL  model name sent to the server (default $EVAL_MODEL or "local"); for claude it is --model
+#   -c CMD    cmd backend: CMD gets the user prompt on stdin and the skill text in the file $EVAL_SYSTEM (empty = none)
+#   -t PCT    exit 1 when the with-skill pass rate of any skill is under PCT percent
+#   -k        keep the answers in ./skills-eval-out/NAME/CASE.{with,without}.txt
+#   -j FILE   append every case that passed WITH the skill to FILE as one JSON line {"messages":[user, assistant]} - the
+#             prompt has no skill text, the answer is the skill-following one: a ready SFT set that distils the skill
+#             into a model's weights (run it with -b claude, a strong model, then train the small one on it)
+#   -n        baseline off: only with the skill (half the model calls)
+# Exit 0 fine, 1 under the threshold, 2 bad usage or a model/server failure. Needs jq (and curl for the openai backend).
+
+case ${1:-} in -h | --help) awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;; esac
+
+kind=openai url=${EVAL_URL:-http://localhost:8080/v1} model=${EVAL_MODEL:-local} cmd="" thr="" keep=0 base=1 jsonl=""
+while [ $# -gt 0 ]; do
+	case $1 in -b | -u | -m | -c | -t | -j) [ $# -ge 2 ] || { echo "skills-eval: $1 needs a value" >&2; exit 2; } ;; esac
+	case $1 in
+		-b) kind=$2; shift ;; -u) url=$2; shift ;; -m) model=$2; shift ;; -c) cmd=$2; shift ;; -t) thr=$2; shift ;; -j) jsonl=$2; shift ;;
+		-k) keep=1 ;; -n) base=0 ;;
+		--) shift; break ;;
+		-*) echo "skills-eval: unknown option $1 (see --help)" >&2; exit 2 ;;
+		*) break ;;
+	esac
+	shift
+done
+here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+root=$here/..
+case $kind in
+	openai) for t in curl jq; do command -v "$t" > /dev/null || { echo "skills-eval: $t not installed" >&2; exit 2; }; done ;;
+	claude) command -v claude > /dev/null || { echo "skills-eval: claude CLI not found" >&2; exit 2; } ;;
+	cmd) [ -n "$cmd" ] || { echo "skills-eval: -b cmd needs -c CMD" >&2; exit 2; } ;;
+	*) echo "skills-eval: -b is openai, claude or cmd" >&2; exit 2 ;;
+esac
+
+[ -z "$jsonl" ] || command -v jq > /dev/null || { echo "skills-eval: -j needs jq" >&2; exit 2; }
+tmp=$(mktemp -d) && trap 'rm -rf "$tmp"' EXIT
+
+# the text of a skill: SKILL.md without its header
+skill_text() { # NAME -> stdout; non-zero when unknown
+	local f
+	f=$("$here/skills" path "$1" 2> /dev/null) && [ -f "$f" ] || return 1
+	awk 'NR == 1 && $0 == "---" { h = 1; next } h && $0 == "---" { h = 0; next } !h' "$f"
+}
+
+# ask SYSTEMFILE USERFILE -> the answer on stdout; non-zero on a model or server failure
+ask() {
+	local sys=$1 usr=$2 body resp
+	case $kind in
+		openai)
+			body=$(jq -nc --arg m "$model" --rawfile u "$usr" --rawfile s "$sys" \
+				'{model: $m, temperature: 0, seed: 1, max_tokens: 700, messages: ((if $s == "" then [] else [{role: "system", content: $s}] end) + [{role: "user", content: $u}])}')
+			resp=$(curl -sS --max-time 600 -H 'content-type: application/json' -d "$body" "$url/chat/completions") || return 1
+			printf '%s' "$resp" | jq -er '.choices[0].message.content' 2> /dev/null || { printf '%s\n' "$resp" | jq -r '.error.message? // .error? // .' 2> /dev/null | head -c 300 >&2; echo >&2; return 1; }
+			;;
+		claude)
+			if [ -s "$sys" ]; then claude -p --model "$model" --append-system-prompt "$(cat "$sys")" < "$usr"; else claude -p --model "$model" < "$usr"; fi
+			;;
+		cmd) EVAL_SYSTEM=$sys sh -c "$cmd" < "$usr" ;;
+	esac
+}
+
+# split a case file: prints the section ($2) of file $1, comments and blank edge lines dropped
+section() {
+	awk -v want="$2" '
+		/^#/ { next }
+		$0 == "prompt" || $0 == "expect" || $0 == "forbid" { cur = $0; next }
+		cur == want { print }' "$1"
+}
+
+# judge CASEFILE ANSWERFILE -> prints nothing when it passes, the reason when it fails
+judge() {
+	local re
+	while IFS= read -r re; do
+		[ -n "$re" ] || continue
+		grep -Eiq -- "$re" "$2" || { printf 'missing /%s/' "$re"; return 0; }
+	done < <(section "$1" expect)
+	while IFS= read -r re; do
+		[ -n "$re" ] || continue
+		grep -Eiq -- "$re" "$2" && { printf 'forbidden /%s/' "$re"; return 0; }
+	done < <(section "$1" forbid)
+	return 0
+}
+
+names=("$@")
+if [ ${#names[@]} -eq 0 ]; then
+	for d in "$root"/evals/*/; do [ -d "$d" ] && ls "$d"*.case > /dev/null 2>&1 && names+=("$(basename "$d")"); done
+fi
+[ ${#names[@]} -gt 0 ] || { echo "skills-eval: no cases under $root/evals" >&2; exit 2; }
+
+rc=0
+for name in "${names[@]}"; do
+	cases=("$root"/evals/"$name"/*.case)
+	[ -e "${cases[0]}" ] || { echo "skills-eval: no cases for $name" >&2; rc=2; continue; }
+	skill_text "$name" > "$tmp/skill" || { echo "skills-eval: unknown skill $name" >&2; rc=2; continue; }
+	: > "$tmp/none"
+	pw=0 po=0 total=0 fails=""
+	for c in "${cases[@]}"; do
+		cn=$(basename "$c" .case)
+		section "$c" prompt > "$tmp/user"
+		[ -s "$tmp/user" ] || { echo "skills-eval: $c has no prompt section" >&2; rc=2; continue; }
+		total=$((total + 1))
+		ask "$tmp/skill" "$tmp/user" > "$tmp/with" || { echo "skills-eval: the model failed on $name/$cn" >&2; exit 2; }
+		why=$(judge "$c" "$tmp/with")
+		if [ -z "$why" ]; then
+			pw=$((pw + 1))
+			[ -n "$jsonl" ] && jq -nc --rawfile u "$tmp/user" --rawfile a "$tmp/with" '{messages: [{role: "user", content: ($u | rtrimstr("\n"))}, {role: "assistant", content: ($a | rtrimstr("\n"))}]}' >> "$jsonl"
+		else fails="$fails  FAIL with skill: $cn ($why)"$'\n'; fi
+		if [ "$base" = 1 ]; then
+			ask "$tmp/none" "$tmp/user" > "$tmp/without" || { echo "skills-eval: the model failed on $name/$cn (baseline)" >&2; exit 2; }
+			[ -z "$(judge "$c" "$tmp/without")" ] && po=$((po + 1))
+		fi
+		if [ "$keep" = 1 ]; then
+			mkdir -p "skills-eval-out/$name"; cp "$tmp/with" "skills-eval-out/$name/$cn.with.txt"
+			[ "$base" = 1 ] && cp "$tmp/without" "skills-eval-out/$name/$cn.without.txt"
+		fi
+	done
+	[ "$total" -gt 0 ] || continue
+	if [ "$base" = 1 ]; then
+		printf '%s: with skill %d/%d, without %d/%d, lift %+d\n' "$name" "$pw" "$total" "$po" "$total" "$((pw - po))"
+	else
+		printf '%s: with skill %d/%d\n' "$name" "$pw" "$total"
+	fi
+	[ -n "$fails" ] && printf '%s' "$fails"
+	if [ -n "$thr" ] && [ $((pw * 100)) -lt $((thr * total)) ]; then rc=1; fi
+done
+exit $rc

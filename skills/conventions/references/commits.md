@@ -1,6 +1,6 @@
 # conventions (commits)
 
-The user's rule: Conventional Commits everywhere, in every repo.
+His rule: Conventional Commits everywhere, in every repo.
 
 `<type>(<scope>): <summary>` whatever the existing history looks like; pushed history is not rewritten to match.
 - Type: feat, fix, refactor, perf, docs, test, chore, build, ci, style, revert. Breaking: `!` before the colon

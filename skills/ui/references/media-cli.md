@@ -1,12 +1,13 @@
 # ui (media-cli)
 
-## Habits
+## His tools first (Gucixdev/bash)
 
-If the user has format-conversion or repair wrappers installed, use them first; otherwise the tools below. A wrapper
-worth having picks the backend by the two file extensions (magick/ffmpeg for images, audio and video, assimp for 3D
-models, fontforge for fonts, pandoc for documents), never overwrites without a flag, and can repair a broken file into a
-new name (re-mux, then re-encode). Originals are never overwritten: new names, or the old file to the trash first
-(`rules (trash-not-rm)`).
+- `morph IN OUT` - `mv` for formats: picks magick/convert/ffmpeg (images, audio, video), assimp (obj fbx gltf glb stl
+  ply dae 3ds), fontforge (ttf otf woff woff2) or pandoc by the two extensions; never overwrites without `-f`;
+  `morph -l` lists the backends found.
+- `fixmedia FILE` - repairs into `fixed-NAME` (re-mux, then re-encode; images re-saved); `-c` only checks.
+- `metadata_cleaner FILE` - strips EXIF and the like into `clean-NAME`.
+Originals are never overwritten: new names, or the old file to the trash first (`rules (trash-not-rm)`).
 
 ## ImageMagick
 
@@ -28,7 +29,7 @@ IM7 is `magick`; IM6 only has `convert`/`identify`/`mogrify` - check which exist
 - Remux, no re-encode: `ffmpeg -i in.mkv -c copy out.mp4`
 - Trim fast (cuts on keyframes): `ffmpeg -ss 00:01:00 -to 00:02:00 -i IN -c copy OUT`; frame-accurate: re-encode
 - H.264: `-c:v libx264 -crf 20 -preset slow -pix_fmt yuv420p -c:a aac -b:a 160k`; AV1 `-c:v libsvtav1 -crf 35`
-- An older NVIDIA GPU (Pascal): `h264_nvenc` and `hevc_nvenc` encode (no AV1); check `ffmpeg -hide_banner -encoders | grep
+- His GPU (Pascal): `h264_nvenc` and `hevc_nvenc` encode (no AV1); check `ffmpeg -hide_banner -encoders | grep
   nvenc` and the flags with `ffmpeg -h encoder=h264_nvenc`
 - GIF with a real palette: `-vf "fps=15,scale=480:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse"`
 - Audio only: `-vn -c:a libopus -b:a 96k out.opus`; loudness `-af loudnorm`
@@ -39,14 +40,15 @@ IM7 is `magick`; IM6 only has `convert`/`identify`/`mogrify` - check which exist
 ## Fonts
 
 - Find: `fc-list : family file`, `fc-match 'Fixed'`; after adding fonts to `~/.local/share/fonts`: `fc-cache -f`.
-- Convert: fontforge; inspect and subset with fonttools (`ttx -l FONT`, `pyftsubset FONT --unicodes=...`);
+- Convert: `morph` (fontforge); inspect and subset with fonttools (`ttx -l FONT`, `pyftsubset FONT --unicodes=...`);
   bitmap BDF/PCF to OpenType bitmap with `fonttosfnt -o OUT.otb IN.bdf` (Wayland terminals take OTB, not PCF).
-- Bitmap faces: misc-fixed 6x13, the TempleOS 8x8 look (`ui (ui-designer)`).
+- Bitmap faces he likes: misc-fixed 6x13, the TempleOS 8x8 look (`ui (ui-designer)`).
 - Licenses before bundling a font in a game or app: SIL OFL fonts can be bundled (not sold alone); GNU FreeFont
   (FreeMono, FreeSans, FreeSerif) is GPLv3 with the font exception, so documents using it are not GPL.
 
 ## 3D models (assimp)
 
 - `assimp info MODEL` - meshes, materials, animations; `assimp listext` (imports), `assimp listexport` (exports).
-- Convert to glTF (the format Godot and most engines take): `assimp export in.fbx out.glb` (format from the extension; check `assimp help export`).
-- What assimp mangles (rigs, modifiers, materials) goes through Blender instead: `blender -b in.blend --python-expr 'import bpy; bpy.ops.export_scene.gltf(filepath="out.glb")'`.
+- Convert for Godot: `assimp export in.fbx out.glb` (format from the extension; check `assimp help export`).
+- What assimp mangles (rigs, modifiers, materials) goes through Blender instead: the Blender to Godot pipeline in
+  `godot`, or `blender -b in.blend --python-expr 'import bpy; bpy.ops.export_scene.gltf(filepath="out.glb")'`.

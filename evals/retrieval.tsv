@@ -1,0 +1,15 @@
+make an enclosure for a board	hardware-anything/references/cad.md
+announce my repo on HN	announce-anything/SKILL.md
+prune a model	model-surgery/references/prune.md
+shrink a model so it fits in 4 GB of VRAM	model-surgery/references/quant.md
+combine two fine-tuned checkpoints into one without training	model-surgery/references/merge.md
+what format should my commit message have	conventions/references/commits.md
+get second opinions from several free LLMs and compare them	workflow/references/llm-council.md
+pull product prices from a website that has no API	anything/scrape-everything/SKILL.md
+find out what an unknown app sends over the network	rea/references/network.md
+prove that my optimized C function is correct	code/references/lean4.md
+route a two layer circuit board and produce gerbers	hardware-anything/references/pcb.md
+resize a batch of images and convert a video	ui/references/media-cli.md
+I want to get rid of an old file I no longer need	rules/references/trash-not-rm.md
+cut a release: what to check before tagging a version	anything/ship-anything/SKILL.md
+make sure no secrets or my username are in the repo before it goes public	anything/publish-anything/SKILL.md

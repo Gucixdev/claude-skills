@@ -5,7 +5,7 @@ you want to know which layers, heads or MLPs are responsible, instead of guessin
 
 ## Setup
 
-- A model small enough to run with caches: on a small machine a 0.5-1.7B model on CPU, or in fp16 on the GPU if it
+- A model small enough to run with caches: on this machine a 0.5-1.7B model on CPU, or in fp16 on the GPU if it
   fits. Tools: TransformerLens or nnsight.
 - A **metric** that is one number per prompt, for example the logit of the EOS token minus the logit of the token the
   model wrongly emits instead. Without a number there is nothing to localize.

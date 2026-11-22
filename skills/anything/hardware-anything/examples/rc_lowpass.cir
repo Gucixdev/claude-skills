@@ -1,0 +1,18 @@
+* RC low-pass, 1 kohm + 100 nF: corner frequency 1/(2 pi R C) = 1591.5 Hz. The .measure line is the test.
+V1 in 0 AC 1
+R1 in out 1k
+C1 out 0 100n
+.ac dec 100 10 1meg
+.control
+run
+meas ac fc when vdb(out)=-3.0103
+let err = abs(fc - 1591.55) / 1591.55
+echo "corner $&fc Hz, error $&err"
+if err > 0.01
+  echo FAIL
+else
+  echo PASS
+end
+quit
+.endc
+.end

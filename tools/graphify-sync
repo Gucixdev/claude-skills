@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# graphify-sync - refresh the code graph of repos and put it where graphify_gate and the MCP tools look for it.
+#
+#   graphify-sync                 every repo listed in ~/.config/graphify/repos (one path per line, # comments)
+#   graphify-sync PATH...         just these repos
+#   graphify-sync -l              list repos with graph age and size, change nothing
+#
+# Per repo: `graphify update` (tree-sitter, no LLM, no network), `graphify-out` added to .git/info/exclude so it never
+# shows up in a diff, and ~/.local/share/graphify/NAME linked to REPO/graphify-out (NAME = the repo folder name, what
+# graphify_gate looks up). A real folder already at that place is left alone and reported, not replaced.
+# Query a repo's graph through the MCP tools with project_path=REPO, no server restart needed.
+# Env: GRAPHIFY_BIN, GRAPHIFY_HOME, GRAPHIFY_REPOS, GRAPHIFY_TIMEOUT (seconds per repo, default 900).
+set -u
+
+bin=${GRAPHIFY_BIN:-$HOME/.local/share/graphify-venv/bin/graphify}
+home=${GRAPHIFY_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/graphify}
+list=${GRAPHIFY_REPOS:-$HOME/.config/graphify/repos}
+tmo=${GRAPHIFY_TIMEOUT:-900}
+
+case ${1:-} in
+-h | --help)
+	sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+	exit 0
+	;;
+esac
+[ -x "$bin" ] || {
+	echo "graphify-sync: no graphify at $bin (set GRAPHIFY_BIN)" >&2
+	exit 1
+}
+
+list_only=0
+[ "${1:-}" = -l ] && {
+	list_only=1
+	shift
+}
+
+if [ $# -gt 0 ]; then
+	repos=("$@")
+elif [ -f "$list" ]; then
+	mapfile -t repos < <(sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$list" | grep .)
+else
+	echo "graphify-sync: no repos given and no $list" >&2
+	exit 1
+fi
+
+fail=0
+for r in "${repos[@]}"; do
+	r=${r/#\~/$HOME}
+	[ -d "$r" ] || {
+		echo "skip   $r (not a folder)" >&2
+		fail=1
+		continue
+	}
+	r=$(cd "$r" && pwd -P)
+	name=$(basename "$r")
+	g=$r/graphify-out/graph.json
+
+	if [ $list_only = 1 ]; then
+		if [ -f "$g" ]; then
+			printf '%-22s %6s days old  %6s KiB  %s\n' "$name" "$((($(date +%s) - $(stat -c %Y "$g")) / 86400))" "$(($(stat -c %s "$g") / 1024))" "$r"
+		else
+			printf '%-22s no graph          %s\n' "$name" "$r"
+		fi
+		continue
+	fi
+
+	if out=$(cd "$r" && timeout "$tmo" "$bin" update . 2>&1); then
+		msg=$(printf '%s' "$out" | grep -o 'Rebuilt: .*' | tail -1)
+		printf 'built  %-22s %s\n' "$name" "${msg:-up to date}"
+	else
+		printf 'FAILED %-22s %s\n' "$name" "$(printf '%s' "$out" | tail -1)" >&2
+		fail=1
+		continue
+	fi
+
+	if [ -d "$r/.git" ]; then
+		ex=$r/.git/info/exclude
+		mkdir -p "$(dirname "$ex")"
+		grep -qx 'graphify-out' "$ex" 2> /dev/null || echo 'graphify-out' >> "$ex"
+	fi
+
+	mkdir -p "$home"
+	if [ -e "$home/$name" ] && [ ! -L "$home/$name" ]; then
+		echo "keep   $home/$name is a real folder, not linked (move it aside to link)" >&2
+	else
+		ln -sfn "$r/graphify-out" "$home/$name"
+	fi
+done
+exit $fail

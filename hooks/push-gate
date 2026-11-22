@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# push-gate - Claude Code PreToolUse hook for Bash: his rule is "push to GitHub only when he says so". A push (git push,
+# push-gate - Claude Code PreToolUse hook for Bash: his rule: finished, checked work in his own repos may be pushed (2026-11-22), everything else only when he says so. A push (git push,
 # gh pr create/merge, gh release create, gh repo create/delete) is refused with a reminder (the GitHub MCP tools are not
 # covered, they would need their own matcher), except a remote matching $PUSH_GATE_ALLOW (a substring, e.g. his private backup repo, pushed after every round).
 # After he has said "push" in chat, the command carries the word itself: `PUSH_OK=1 git push ...` goes through.
@@ -11,8 +11,9 @@ printf '%s' "$cmd" | grep -qE '(^|[;&|(`]|&&|\|\|)[[:space:]]*(PUSH_OK=1[[:space
 case $cmd in *PUSH_OK=1*) exit 0 ;; esac
 [ -n "${PUSH_GATE_ALLOW:-}" ] && case $cmd in *"$PUSH_GATE_ALLOW"*) exit 0 ;; esac
 cat >&2 << 'MSG'
-push-gate: a push is outward-facing and he decides when. Nothing was run.
-If he has said "push" for this repo in the chat, run it again as: PUSH_OK=1 <the same command>
+push-gate: a push is outward-facing. Nothing was run.
+He allows pushing finished, checked work in his own repos (rules (discipline), 2026-11-22): run it again as
+PUSH_OK=1 <the same command>. Not finished, not his repo, a PR or a release: only if he asked in the chat.
 A remote matching $PUSH_GATE_ALLOW (a substring, e.g. a private backup repo) is always allowed.
 MSG
 exit 2

@@ -6,10 +6,18 @@ Git and agents: what is done only when he says so.
 
 ## Commit and push
 
-- Commit as work lands, small and often. Never push or open a PR until he says so for that repo; a go-ahead covers
-  that repo and that batch, not a later one or another repo. "Is this ready to push?" is a question, not an ask.
-- He said push for: Gucixdev/bash and dotfiles (2026-10-10/11), vecindex ("pushuj odrazu", 2026-10-18), claude-config
-  skills ("skille spushuj na githuba, one muszą być w repo", 2026-10-18).
+- Commit as work lands, small and often. **Standing go-ahead (2026-11-22, "wolę pushować niż na dysku kisić"):** his own
+  repos get finished work pushed right after the commit (`PUSH_OK=1 git push`, which `push-gate` lets through), so
+  nothing waits on the disk. The limits, all still in force:
+  - only finished, checked work: tests green, the project's own check passes, nothing half-moved; a dirty tree is
+    never pushed around, only commits are
+  - a repo with no remote yet gets a **private** one first (`gh repo create --private`); public is a separate ask, then
+    `publish-anything` and the identity scan run before the first public push
+  - the empty-project rule below, the identity scan, no force-push, no history rewrite, no branch delete stand
+  - not his repo, a PR, a release or a tag: still only when he asks
+  Earlier per-repo go-aheads, kept for the record: Gucixdev/bash and dotfiles (2026-10-10/11), vecindex ("pushuj
+  odrazu", 2026-10-18), claude-config skills ("skille spushuj na githuba, one muszą być w repo", 2026-10-18).
+- "Is this ready to push?" is still a question, not an ask.
 - A cloud session's container is thrown away at the end: a commit that is not pushed is lost. When he hasn't said
   anything about a repo there, ask once at the first commit.
 - Do not push an empty project. A repo that holds only a README, a one-line idea or a placeholder file is not

@@ -1,6 +1,6 @@
 ---
 name: rules
-description: His standing rules for every task - never delete, force-push or push unasked, spawn agents readily, spend money, leak identity or secrets, claim without proof; always trash instead of rm, say how sure you are, read the docs before guessing, ask only when it changes the work, free and local first. Applies to every task.
+description: His standing rules for every task - never delete, force-push, push unfinished work or open PRs unasked, spawn agents readily, spend money, leak identity or secrets, claim without proof; always trash instead of rm, say how sure you are, read the docs before guessing, ask only when it changes the work, free and local first. Applies to every task.
 metadata:
   priority: "0"
   tags: "#safety #files #trash #versions #git #identity #privacy #publishing #agents #delegation #workflow #thirdparties #cost #money #selfhost #dependencies #epistemic #calibration #confidence #honesty #numbers #research #clarification #questions #communication #docs #manpages #stubborn #github #commits #dev"
@@ -15,8 +15,8 @@ The digest is the rules; open a part when its situation comes up.
 
 - Delete. Files and folders go to the trash, a file is versioned before every change, history is not rewritten and
   nothing is force-pushed unasked (`rules (trash-not-rm)`, `rules (discipline)`).
-- Push or open a PR until he said so for that repo; a go-ahead covers that repo and that batch only
-  (`rules (discipline)`).
+- Push to a repo that is not his, push work that is not finished, or open a PR unasked. His own repos get finished,
+  checked work pushed soon after the commit (standing go-ahead 2026-11-22, limits in `rules (discipline)`).
 - Push an empty or nearly empty project (a README stub, a placeholder, one file of notes) - it stays local until it
   has something that builds or works (`rules (discipline)`).
 - Spawn agents readily: do the work directly; fork only when he asks or the task cannot fit (`rules (discipline)`).

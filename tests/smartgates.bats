@@ -348,3 +348,16 @@ result() { jq -cn --arg id "$1" --argjson e "$2" '{type: "user", message: {conte
 	[ "$status" -eq 2 ]
 	[[ $output == *"looks like a secret"* ]]
 }
+
+@test "publish_gate: a graph older than the last commit refuses the push, a fresh one passes" {
+	printf 'LICENSE\n' > "$R/LICENSE"; printf '# x\n' > "$R/README.md"
+	git -C "$R" add . && git -C "$R" commit -qm c
+	mkdir -p "$GRAPHIFY_HOME/proj"; : > "$GRAPHIFY_HOME/proj/graph.json"
+	touch -d '1 hour ago' "$GRAPHIFY_HOME/proj/graph.json"
+	run env PUBLISH_GATE_TESTS=0 "$H/publish_gate" < <(pre Bash '{"command":"git push"}')
+	[ "$status" -eq 2 ]
+	[[ $output == *"graph is older"* ]]
+	touch "$GRAPHIFY_HOME/proj/graph.json"
+	run env PUBLISH_GATE_TESTS=0 "$H/publish_gate" < <(pre Bash '{"command":"git push"}')
+	[[ $output != *"graph is older"* ]]
+}

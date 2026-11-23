@@ -7,6 +7,7 @@
 #   - no tracked file carries the local login name ($USER) or the home folder ($HOME) - identity and machine paths
 #     never go public (rules (identity)); the scan is git grep over tracked files, the first hits are listed;
 #   - no tracked file holds something that looks like a key or token (the secret-guard patterns, over git grep);
+#   - a repo that has a graphify graph (the graphify_gate location) has it at least as new as its last commit;
 #   - the tests pass when there is something to run (./check, ./test, tests/*.bats): run here, 120 s at most.
 # Any failure refuses the command (exit 2) with the list. A remote matching $PUSH_GATE_ALLOW (his private backup
 # repo, the same setting push-gate has) is not checked: it is not public. PUBLISH_GATE_TESTS=0 skips the test run;
@@ -50,6 +51,11 @@ secrets=$(git -C "$root" grep -I -n -E -e '-----BEGIN ([A-Z]+ )?PRIVATE KEY' -e 
 	-e 'AIza[0-9A-Za-z_-]{35}' -- . ':!*.bats' 2> /dev/null | grep -viE 'example|fake|dummy|placeholder|x{6,}' | cut -d: -f1,2 | head -5)
 [ -z "$secrets" ] || bad+="
   something that looks like a secret (same patterns as secret-guard) in: $(printf '%s' "$secrets" | tr '\n' ' ')"
+g=${GRAPHIFY_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/graphify}/$(basename -- "$root")/graph.json
+if [ -f "$g" ] && [ "$(git -C "$root" log -1 --format=%ct 2> /dev/null || echo 0)" -gt "$(stat -c %Y "$g")" ]; then
+	bad+="
+  the graphify graph is older than the last commit: update it first (graphify-sync, tools/graphify-sync in claude-config)"
+fi
 if [ "${PUBLISH_GATE_TESTS:-1}" != 0 ]; then
 	run=''
 	for c in check test; do [ -x "$root/$c" ] && { run=./$c; break; }; done

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# karpathy_gate - Claude Code hook after the guidelines Karpathy gave for coding agents: think before the edit, change
+# only what the task needs, and finish on a criterion that was checked. Two events, one file:
+#   PreToolUse (Write|Edit|MultiEdit) on a code file: the turn has no text yet that states the assumptions and the
+#     plan - refused once per message of his; and a Write over a code file that already exists replaces all of it - refused
+#     once per file: use Edit for the part that changes, or say why the whole file goes.
+#   Stop: code was edited in this turn and the last text names no success criterion (what was checked, the command and
+#     its result) - handed back once per message of his.
+# Asking again, with the answer in the reply, goes through. KARPATHY_GATE=off disables it. Needs jq.
+# Enable (you, in settings.json): hooks.PreToolUse matcher "Write|Edit|MultiEdit", and hooks.Stop, command ~/.claude/hooks/karpathy_gate.
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${KARPATHY_GATE:-on}" = off ] && exit 0
+tool=$(printf '%s' "$input" | jq -r '.tool_name // empty')
+turn=$(sg_turn)
+ln=$(printf '%s\n' "$turn" | awk -F'\t' '$1 == "U" { n = $2 } END { print n }')
+plan_re='(assum|zalo[zż]en|za[lł]o[zż]en|plan|approach|zamierz|podej[sś]cie|surgical|chirurg|will change|zmieni[eę]|touch only)'
+done_re='(criteri|kryteri|verified|zweryfikow|sprawdzon|checked|passes|passed|przechodz|zielon|green|exit 0|all ok|ALL OK|[0-9]+ (tests? )?(passed|ok))'
+
+if [ -n "$tool" ]; then
+	f=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
+	sg_is_code "$f" || exit 0
+	if [ "$tool" = Write ] && [ -e "$f" ]; then
+		sg_once "write:$f" || exit 0
+		sg_block "karpathy_gate: Write replaces all of $(basename "$f"). Change only what the task needs: use Edit for that part, or say in the reply why the whole file goes; then repeat."
+	fi
+	printf '%s\n' "$turn" | awk -F'\t' '$1 == "A" { print $2 }' | grep -qiE -- "$plan_re" && exit 0
+	sg_once "plan:$ln" || exit 0
+	sg_block "karpathy_gate: no assumptions and plan yet in this turn. Write them in the reply: what you assume, what you will change (only that), and how you will know it works; then repeat the edit."
+fi
+
+sg_limited && exit 0
+[ -n "$turn" ] || exit 0
+sg_seq "$turn"
+[[ $seq == *E* ]] || exit 0
+last=$(printf '%s\n' "$turn" | awk -F'\t' '$1 == "A" { t = $2 } END { print t }')
+printf '%s' "$last" | grep -qiE -- "$done_re" && exit 0
+sg_once "crit:$ln" || exit 0
+sg_block "karpathy_gate: code was edited and the reply names no success criterion. Say what had to hold, the command that checked it and its result; run the check if it was not run."

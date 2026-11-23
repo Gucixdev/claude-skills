@@ -29,7 +29,8 @@ Optional hooks (wire them in Claude Code's `settings.json` yourself):
   `test_gate`, `caveman_gate`, `updatedocsgate`, `knowsunknown_gate` (claims, paths), `evolve_gate` (his failed tool),
   `tokenlimitgate` (first: after the usage limit the others stand down). PreToolUse: `publish_gate` (license, README,
   identity scan, tests before a push), `leanctx_gate`, `ponytail_gate`, `graphify_gate`, `mybashtoolgate`,
-  `readmegate`. Sessions: `session-start`, `session-end`.
+  `readmegate`. Both events: `karpathy_gate` (plan before the edit, no whole-file Write over code, a named success
+  criterion at the end). Sessions: `session-start`, `session-end`.
 - `bin/versions` - every edit Claude makes is stored first, `versions restore` brings it back; `tools/` and `evals/`
   hold small helpers and skill evals.
 

@@ -23,7 +23,7 @@ result() { jq -cn --arg id "$1" --argjson e "$2" '{type: "user", message: {conte
 @test "smartgates alone lists the gates" {
 	run "$H/smartgates"
 	[ "$status" -eq 0 ]
-	for g in knowsunknown_gate evolve_gate debug_gate test_gate caveman_gate leanctx_gate ponytail_gate graphify_gate mybashtoolgate readmegate updatedocsgate publish_gate tokenlimitgate; do
+	for g in karpathy_gate knowsunknown_gate evolve_gate debug_gate test_gate caveman_gate leanctx_gate ponytail_gate graphify_gate mybashtoolgate readmegate updatedocsgate publish_gate tokenlimitgate; do
 		[[ $output == *"$g"* ]]
 	done
 }
@@ -276,5 +276,48 @@ result() { jq -cn --arg id "$1" --argjson e "$2" '{type: "user", message: {conte
 @test "evolve_gate: a failing system command or a red test is not a broken tool" {
 	user "uruchom"; bash_ b1 "grep nothing /dev/null"; result b1 true; bash_ b2 "bats tests/"; result b2 true
 	run "$H/evolve_gate" < <(ev)
+	[ "$status" -eq 0 ]
+}
+
+@test "karpathy_gate: an edit before any plan is refused once, a plan lets it through" {
+	user "zrob to"
+	run "$H/karpathy_gate" < <(pre Edit "{\"file_path\": \"$R/code.sh\"}")
+	[ "$status" -eq 2 ]
+	[[ $output == *"assumptions and plan"* ]]
+	run "$H/karpathy_gate" < <(pre Edit "{\"file_path\": \"$R/code.sh\"}")
+	[ "$status" -eq 0 ]
+	: > "$T/tr.jsonl"; rm -rf "$SESSION_GATE_DIR"
+	user "zrob to"; say "Assumption: the script is POSIX. Plan: change one line in code.sh only."
+	run "$H/karpathy_gate" < <(pre Edit "{\"file_path\": \"$R/code.sh\"}")
+	[ "$status" -eq 0 ]
+}
+
+@test "karpathy_gate: Write over an existing code file is refused once; a new file and a doc are not" {
+	user "zrob to"; say "Plan: small change."
+	run "$H/karpathy_gate" < <(pre Write "{\"file_path\": \"$R/code.sh\"}")
+	[ "$status" -eq 2 ]
+	[[ $output == *"use Edit"* ]]
+	run "$H/karpathy_gate" < <(pre Write "{\"file_path\": \"$R/code.sh\"}")
+	[ "$status" -eq 0 ]
+	run "$H/karpathy_gate" < <(pre Write "{\"file_path\": \"$R/new.sh\"}")
+	[ "$status" -eq 0 ]
+	run "$H/karpathy_gate" < <(pre Write "{\"file_path\": \"$R/NOTES.md\"}")
+	[ "$status" -eq 0 ]
+}
+
+@test "karpathy_gate: Stop after an edit needs a named success criterion, once" {
+	user "zrob to"; edit "$R/code.sh"; say "Done."
+	run "$H/karpathy_gate" < <(ev)
+	[ "$status" -eq 2 ]
+	[[ $output == *"success criterion"* ]]
+	run "$H/karpathy_gate" < <(ev)
+	[ "$status" -eq 0 ]
+	: > "$T/tr.jsonl"; rm -rf "$SESSION_GATE_DIR"
+	user "zrob to"; edit "$R/code.sh"; say "Criterion: bats tests/ passes - 12 passed."
+	run "$H/karpathy_gate" < <(ev)
+	[ "$status" -eq 0 ]
+	: > "$T/tr.jsonl"; rm -rf "$SESSION_GATE_DIR"
+	user "co to robi"; say "It lists files."
+	run "$H/karpathy_gate" < <(ev)
 	[ "$status" -eq 0 ]
 }

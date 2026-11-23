@@ -5,6 +5,10 @@
 #   graphify-sync PATH...         just these repos
 #   graphify-sync -l              list repos with graph age and size, change nothing
 #   (a line `auto ROOT` in the list means every repo under ROOT, found again on each run)
+#   graphify-sync -m [OUT]        merge every listed repo's graph into one cross-repo graph (graphify merge-graphs), default
+#                                 $GRAPHIFY_HOME/_merged/graph.json; query it with --graph, or as project_path of that folder
+#   graphify-sync -i [PATH...]    install a post-commit hook in those repos (default: every listed repo) that runs this tool
+#                                 on the repo in the background; an existing post-commit hook is kept and extended
 #   graphify-sync -w              stay running: inotify over every listed repo, a change (yours, mine, any program's) rebuilds that
 #                                 repo's graph a few seconds after the last write; one watcher at a time (flock)
 #
@@ -22,7 +26,7 @@ tmo=${GRAPHIFY_TIMEOUT:-900}
 
 case ${1:-} in
 -h | --help)
-	sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
 	exit 0
 	;;
 esac
@@ -31,15 +35,14 @@ esac
 	exit 1
 }
 
+mode=sync
 list_only=0 watch=0
-[ "${1:-}" = -l ] && {
-	list_only=1
-	shift
-}
-[ "${1:-}" = -w ] && {
-	watch=1
-	shift
-}
+case ${1:-} in
+-l) list_only=1 && shift ;;
+-w) watch=1 && shift ;;
+-m) mode=merge && shift ;;
+-i) mode=hook && shift ;;
+esac
 
 # `auto ROOT` in the list: every git repo under ROOT (ROOT/X, or ROOT/X/Y when X is only a folder of repos, down to
 # depth 3), plus a top-level folder with code and no repo inside (a plain folder). Names in ROOT/.graphifyskip
@@ -121,6 +124,38 @@ sync_one() {
 		ln -sfn "$r/graphify-out" "$home/$name"
 	fi
 }
+
+if [ $mode = merge ]; then
+	read_repos
+	out=${1:-$home/_merged/graph.json}
+	gs=()
+	for r in "${repos[@]}"; do [ -f "$r/graphify-out/graph.json" ] && gs+=("$r/graphify-out/graph.json"); done
+	[ ${#gs[@]} -ge 2 ] || {
+		echo "graphify-sync: need at least two graphs to merge" >&2
+		exit 1
+	}
+	mkdir -p "$(dirname "$out")"
+	"$bin" merge-graphs "${gs[@]}" --out "$out" 2>&1 | tail -3
+	[ -s "$out" ] && echo "merged ${#gs[@]} graphs -> $out"
+	exit $?
+fi
+
+if [ $mode = hook ]; then
+	if [ $# -gt 0 ]; then repos=("$@"); else read_repos; fi
+	me=$(readlink -f "$0")
+	for r in "${repos[@]}"; do
+		r=${r/#\~/$HOME}
+		[ -d "$r/.git" ] || continue
+		h=$r/.git/hooks/post-commit
+		grep -qF 'graphify-sync' "$h" 2> /dev/null && continue
+		[ -f "$h" ] || printf '#!/bin/sh\n' > "$h"
+		# shellcheck disable=SC2016
+		printf '# graphify-sync: keep the code graph fresh\n( nice -n 19 "%s" "$(git rev-parse --show-toplevel)" > /dev/null 2>&1 & )\n' "$me" >> "$h"
+		chmod +x "$h"
+		echo "hook   $(basename "$r")"
+	done
+	exit 0
+fi
 
 if [ $watch = 1 ]; then
 	command -v inotifywait > /dev/null || {

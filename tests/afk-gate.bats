@@ -2,7 +2,7 @@
 # hooks/afk-gate, the Stop hook that keeps Claude working while he is away, with a throwaway state dir and todo file.
 
 setup() {
-	G=$BATS_TEST_DIRNAME/../hooks/unused/afk-gate
+	G=$BATS_TEST_DIRNAME/../hooks/afk-gate
 	export AFK_GATE_DIR=$BATS_TEST_TMPDIR/state
 	export AFK_GATE_TODO=$BATS_TEST_TMPDIR/todo.md
 	printf '# todo\n\n1. old thing -> zrobione\n2. blocked on hardware (blocked)\n3. build the thing\n4. second thing\n' > "$AFK_GATE_TODO"

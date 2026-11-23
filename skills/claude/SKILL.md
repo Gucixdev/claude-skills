@@ -72,6 +72,7 @@ niż na dysku kisić"):
 - `whiteboard-programming` #dev #design #architecture #lean4 #formal #memory #performance #docs #c #dod #workflow
 
 ### Priority 2 - load when the task is one of these
+- `alienspace` #thinking #research #ideas
 - `announce-anything` #publish #social #reddit #hackernews #github #release #security #privacy #marketing
 - `ask-older-brother` #agents #delegation #models #decisions #review #thinking
 - `audit-everything` #thirdparties #audit #review #security #quality #dev

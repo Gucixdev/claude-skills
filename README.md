@@ -31,6 +31,8 @@ Optional hooks (wire them in Claude Code's `settings.json` yourself):
   identity scan, tests before a push), `leanctx_gate`, `ponytail_gate`, `graphify_gate`, `mybashtoolgate`,
   `readmegate`. Both events: `karpathy_gate` (plan before the edit, no whole-file Write over code, a named success
   criterion at the end). Sessions: `session-start`, `session-end`.
+- `mods/afkloop` - a Claude Code mod: `/afkloop on|off|status` keeps a session working from the next open line of todo.md
+  (the forced mode of `afk-gate` as a mod; `claude plugin test mods/afkloop`, 8 tests).
 - `bin/versions` - every edit Claude makes is stored first, `versions restore` brings it back; `tools/` and `evals/`
   hold small helpers and skill evals.
 

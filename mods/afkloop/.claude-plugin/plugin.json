@@ -1,0 +1,20 @@
+{
+  "name": "afkloop",
+  "version": "0.1.0",
+  "description": "Keeps Claude working while you are away: /afkloop on blocks every stop and hands back the next open line of todo.md",
+  "userConfig": {
+    "todo": {
+      "type": "string",
+      "title": "todo file",
+      "description": "Path of todo.md; empty = $CLAUDE_CONFIG/todo.md, else ~/.claude-config/todo.md",
+      "default": ""
+    },
+    "max": {
+      "type": "number",
+      "title": "brake",
+      "description": "Blocked stops after which the mode switches itself off",
+      "default": 300
+    }
+  },
+  "license": "MIT"
+}

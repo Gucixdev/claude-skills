@@ -4,12 +4,15 @@
 #   graphify-sync                 every repo listed in ~/.config/graphify/repos (one path per line, # comments)
 #   graphify-sync PATH...         just these repos
 #   graphify-sync -l              list repos with graph age and size, change nothing
+#   (a line `auto ROOT` in the list means every repo under ROOT, found again on each run)
+#   graphify-sync -w              stay running: inotify over every listed repo, a change (yours, mine, any program's) rebuilds that
+#                                 repo's graph a few seconds after the last write; one watcher at a time (flock)
 #
 # Per repo: `graphify update` (tree-sitter, no LLM, no network), `graphify-out` added to .git/info/exclude so it never
 # shows up in a diff, and ~/.local/share/graphify/NAME linked to REPO/graphify-out (NAME = the repo folder name, what
 # graphify_gate looks up). A real folder already at that place is left alone and reported, not replaced.
 # Query a repo's graph through the MCP tools with project_path=REPO, no server restart needed.
-# Env: GRAPHIFY_BIN, GRAPHIFY_HOME, GRAPHIFY_REPOS, GRAPHIFY_TIMEOUT (seconds per repo, default 900).
+# Env: GRAPHIFY_BIN, GRAPHIFY_HOME, GRAPHIFY_REPOS, GRAPHIFY_TIMEOUT (seconds per repo, default 900), GRAPHIFY_DEBOUNCE (seconds, 5).
 set -u
 
 bin=${GRAPHIFY_BIN:-$HOME/.local/share/graphify-venv/bin/graphify}
@@ -19,7 +22,7 @@ tmo=${GRAPHIFY_TIMEOUT:-900}
 
 case ${1:-} in
 -h | --help)
-	sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
 	exit 0
 	;;
 esac
@@ -28,28 +31,56 @@ esac
 	exit 1
 }
 
-list_only=0
+list_only=0 watch=0
 [ "${1:-}" = -l ] && {
 	list_only=1
 	shift
 }
+[ "${1:-}" = -w ] && {
+	watch=1
+	shift
+}
 
-if [ $# -gt 0 ]; then
-	repos=("$@")
-elif [ -f "$list" ]; then
-	mapfile -t repos < <(sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$list" | grep .)
-else
-	echo "graphify-sync: no repos given and no $list" >&2
-	exit 1
-fi
+# `auto ROOT` in the list: every git repo under ROOT (ROOT/X, or ROOT/X/Y when X is only a folder of repos, down to
+# depth 3), plus a top-level folder with code and no repo inside (a plain folder). Names in ROOT/.graphifyskip
+# (one per line, # comments) and worktrees (`.git` is a file) are left out; new repos show up on the next call.
+discover() {
+	local root=$1 d g skipf=$1/.graphifyskip
+	for d in "$root"/*/; do
+		d=${d%/}
+		[ -d "$d" ] && [ ! -L "$d" ] || continue
+		[ -f "$skipf" ] && sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$skipf" | grep -qxF "$(basename "$d")" && continue
+		if [ -d "$d/.git" ]; then
+			echo "$d"
+			continue
+		fi
+		g=$(find "$d" -maxdepth 3 -name .git -type d -not -path '*/node_modules/*' -not -path '*/target/*' 2> /dev/null | sed 's#/\.git$##' | sort)
+		if [ -n "$g" ]; then
+			echo "$g"
+		elif [ -n "$(find "$d" -maxdepth 3 -type f \( -name '*.c' -o -name '*.h' -o -name '*.rs' -o -name '*.py' -o -name '*.go' -o -name '*.ts' -o -name '*.gd' -o -name '*.el' -o -name '*.lean' -o -name '*.mojo' -o -name '*.sh' \) -not -path '*/node_modules/*' -not -path '*/target/*' -print -quit 2> /dev/null)" ]; then
+			echo "$d"
+		fi
+	done
+}
 
-fail=0
-for r in "${repos[@]}"; do
-	r=${r/#\~/$HOME}
+read_repos() {
+	local l
+	repos=()
+	while IFS= read -r l; do
+		l=${l/#\~/$HOME}
+		case $l in
+		auto\ *) mapfile -t -O "${#repos[@]}" repos < <(discover "${l#auto }") ;;
+		*) repos+=("$l") ;;
+		esac
+	done < <(sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$list" | grep .)
+}
+
+# one repo: update its graph, keep graphify-out out of git, link it where the gate and MCP tools look. 0 = fine.
+sync_one() {
+	local r=$1 name g out msg ex
 	[ -d "$r" ] || {
 		echo "skip   $r (not a folder)" >&2
-		fail=1
-		continue
+		return 1
 	}
 	r=$(cd "$r" && pwd -P)
 	name=$(basename "$r")
@@ -61,16 +92,20 @@ for r in "${repos[@]}"; do
 		else
 			printf '%-22s no graph          %s\n' "$name" "$r"
 		fi
-		continue
+		return 0
 	fi
 
 	if out=$(cd "$r" && timeout "$tmo" "$bin" update . 2>&1); then
 		msg=$(printf '%s' "$out" | grep -o 'Rebuilt: .*' | tail -1)
 		printf 'built  %-22s %s\n' "$name" "${msg:-up to date}"
 	else
+		case $out in *"No code files found"*)
+			printf 'skip   %-22s no code files\n' "$name"
+			return 0
+			;;
+		esac
 		printf 'FAILED %-22s %s\n' "$name" "$(printf '%s' "$out" | tail -1)" >&2
-		fail=1
-		continue
+		return 1
 	fi
 
 	if [ -d "$r/.git" ]; then
@@ -85,5 +120,65 @@ for r in "${repos[@]}"; do
 	else
 		ln -sfn "$r/graphify-out" "$home/$name"
 	fi
+}
+
+if [ $watch = 1 ]; then
+	command -v inotifywait > /dev/null || {
+		echo "graphify-sync: -w needs inotifywait (inotify-tools)" >&2
+		exit 1
+	}
+	exec 9> "${XDG_RUNTIME_DIR:-/tmp}/graphify-sync-watch.lock"
+	flock -n 9 || {
+		echo "graphify-sync: a watcher is already running" >&2
+		exit 0
+	}
+	deb=${GRAPHIFY_DEBOUNCE:-5} again=${GRAPHIFY_REDISCOVER:-300}
+	declare -A dirty=()
+	# build output, caches and the graph itself never count as a change
+	skip='/(\.git|target|node_modules|graphify-out|__pycache__|\.venv|venv|\.cache|out|build|dist)(/|$)|(~|\.swp|\.tmp|\.lock|#)$'
+	watchlist=$(mktemp) && trap 'rm -f "$watchlist"' EXIT
+	while true; do
+	read_repos
+	roots=()
+	for r in "${repos[@]}"; do [ -d "$r" ] && roots+=("$(cd "$r" && pwd -P)"); done
+	[ ${#roots[@]} -gt 0 ] || {
+		echo "graphify-sync: nothing to watch" >&2
+		exit 1
+	}
+	# the folders to watch are listed here with the build and cache folders pruned, so setting up is quick even in huge trees
+	# (inotifywait -r would walk them all); a folder created later is picked up when the list is made again
+	find "${roots[@]}" \( -name .git -o -name target -o -name node_modules -o -name graphify-out -o -name __pycache__ -o -name .venv -o -name venv -o -name .cache -o -name out -o -name build -o -name dist \) -prune -o -type d -print > "$watchlist"
+	echo "watching ${#roots[@]} repos, $(wc -l < "$watchlist") folders"
+	# a repo that has no graph yet (new, or never built) is built now; later changes come through inotify
+	for r in "${roots[@]}"; do [ -f "$r/graphify-out/graph.json" ] || nice -n 19 "$0" "$r" || true; done
+	while true; do
+		if read -r -t "$deb" f; then
+			for r in "${roots[@]}"; do
+				case $f in "$r"/*) dirty[$r]=1 ;; esac
+			done
+		elif [ ${#dirty[@]} -gt 0 ]; then
+			for r in "${!dirty[@]}"; do nice -n 19 "$0" "$r" || true; done
+			dirty=()
+		fi
+	done < <(timeout "$again" inotifywait -m -q -e close_write,create,delete,moved_to,moved_from --exclude "$skip" --format '%w%f' --fromfile "$watchlist")
+	for r in "${!dirty[@]}"; do nice -n 19 "$0" "$r" || true; done
+	dirty=()
+	done
+	exit 0
+fi
+
+if [ $# -gt 0 ]; then
+	repos=("$@")
+elif [ -f "$list" ]; then
+	read_repos
+else
+	echo "graphify-sync: no repos given and no $list" >&2
+	exit 1
+fi
+
+fail=0
+for r in "${repos[@]}"; do
+	r=${r/#\~/$HOME}
+	sync_one "$r" || fail=1
 done
 exit $fail

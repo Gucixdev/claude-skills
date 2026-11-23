@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# graphify_hook - Claude Code SessionStart and PostToolUse hook: makes sure the graphify watcher is running, in the
+# background, and returns at once. The watcher (`graphify-sync -w`, one at a time through a lock) rebuilds the graph of
+# any repo under the root listed in ~/.config/graphify/repos (`auto ROOT`) a few seconds after a file in it changes, whoever
+# changed it: you, Claude or another program. This hook never builds anything itself, so it costs no time in the session.
+#
+# GRAPHIFY_HOOK=off disables it. Needs graphify-sync on PATH (tools/graphify-sync) and inotifywait; without them nothing happens.
+# Enable (you, in settings.json): hooks.SessionStart, and hooks.PostToolUse with matcher "Edit|Write|MultiEdit|NotebookEdit|Bash".
+[ "${GRAPHIFY_HOOK:-on}" = off ] && exit 0
+cat > /dev/null
+command -v graphify-sync > /dev/null && command -v inotifywait > /dev/null || exit 0
+lock=${XDG_RUNTIME_DIR:-/tmp}/graphify-sync-watch.lock
+# the lock is held for as long as a watcher lives: if it can be taken, nobody is watching
+flock -n "$lock" true 2> /dev/null || exit 0
+setsid -f graphify-sync -w > "${XDG_STATE_HOME:-$HOME/.local/state}/graphify-sync.log" 2>&1 < /dev/null
+exit 0

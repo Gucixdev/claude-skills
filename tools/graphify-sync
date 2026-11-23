@@ -101,6 +101,9 @@ sync_one() {
 	if out=$(cd "$r" && timeout "$tmo" "$bin" update . 2>&1); then
 		msg=$(printf '%s' "$out" | grep -o 'Rebuilt: .*' | tail -1)
 		printf 'built  %-22s %s\n' "$name" "${msg:-up to date}"
+		# graphify leaves graph.json alone when no code changed; its age is what publish_gate compares with the last
+		# commit, so a graph just confirmed current must say so.
+		[ -f "$g" ] && touch "$g"
 	else
 		case $out in *"No code files found"*)
 			printf 'skip   %-22s no code files\n' "$name"

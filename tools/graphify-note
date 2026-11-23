@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# graphify-note - add a node of your own (a decision, a note, a lesson) to the graph and link it to code.
+#
+#   graphify-note LABEL TEXT [REPO:SYMBOL ...]   add (or replace, same LABEL) a note; each REPO:SYMBOL links it to the node
+#                                                of that label in REPO's graph ("about" edge); SYMBOL = the node label
+#   graphify-note -l                             list the notes
+#   graphify-note -d LABEL                       remove a note
+#
+# Notes live in $GRAPHIFY_HOME/_notes/graph.json (graphify's own format, so the MCP tools and `graphify path/explain
+# --graph` read it); `graphify update` rebuilds a repo's graph.json and would drop them, so they are kept apart, and
+# `graphify-sync -m` merges them into the cross-repo graph. Node ids are `note::slug`, targets `REPO::local_id` as in
+# the merged graph. Needs jq. Env: GRAPHIFY_HOME (default ~/.local/share/graphify).
+
+set -u
+home=${GRAPHIFY_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/graphify}
+g=$home/_notes/graph.json
+command -v jq > /dev/null || { echo "graphify-note: needs jq" >&2; exit 1; }
+mkdir -p "$home/_notes"
+[ -s "$g" ] || printf '{"directed":false,"multigraph":false,"graph":{"schema_version":1},"hyperedges":[],"nodes":[],"links":[]}\n' > "$g"
+
+slug() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '_' | sed 's/__*/_/g;s/^_//;s/_$//'; }
+save() { jq -c . > "$g.tmp" && mv "$g.tmp" "$g"; }
+
+case ${1:-} in
+-h | --help | '')
+	sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+	exit 0
+	;;
+-l)
+	jq -r '.nodes[] | "\(.label)\t\(.text)"' "$g"
+	exit 0
+	;;
+-d)
+	[ -n "${2:-}" ] || { echo "usage: graphify-note -d LABEL" >&2; exit 1; }
+	id=note::$(slug "$2")
+	jq --arg id "$id" '.nodes |= map(select(.id != $id)) | .links |= map(select(.source != $id))' "$g" | save
+	exit 0
+	;;
+esac
+
+label=$1 text=${2:-}
+[ -n "$text" ] || { echo "usage: graphify-note LABEL TEXT [REPO:SYMBOL ...]" >&2; exit 1; }
+shift 2
+id=note::$(slug "$label")
+links='[]'
+for t in "$@"; do
+	repo=${t%%:*} sym=${t#*:}
+	rg=$home/$repo/graph.json
+	[ -f "$rg" ] || { echo "graphify-note: no graph for $repo" >&2; exit 1; }
+	lid=$(jq -r --arg s "$sym" '[.nodes[] | select(.label == $s or .norm_label == ($s | ascii_downcase))][0].id // empty' "$rg")
+	[ -n "$lid" ] || { echo "graphify-note: no node $sym in $repo" >&2; exit 1; }
+	links=$(jq -c --arg id "$id" --arg t "$repo::$lid" '. + [{source: $id, target: $t, relation: "about", confidence: "EXTRACTED", confidence_score: 1.0, weight: 1.0, _origin: "note"}]' <<< "$links")
+done
+jq --arg id "$id" --arg l "$label" --arg t "$text" --arg d "$(date +%F)" --argjson links "$links" '
+	.nodes |= (map(select(.id != $id)) + [{id: $id, label: $l, norm_label: ($l | ascii_downcase), file_type: "note", text: $t, created: $d, _origin: "note"}])
+	| .links |= (map(select(.source != $id)) + $links)' "$g" | save
+echo "note   $label ($(jq length <<< "$links") links)"

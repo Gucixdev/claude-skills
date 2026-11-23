@@ -136,8 +136,14 @@ if [ $mode = merge ]; then
 	}
 	mkdir -p "$(dirname "$out")"
 	"$bin" merge-graphs "${gs[@]}" --out "$out" 2>&1 | tail -3
-	[ -s "$out" ] && echo "merged ${#gs[@]} graphs -> $out"
-	exit $?
+	[ -s "$out" ] || exit 1
+	# his own nodes (graphify-note) go in as they are: their ids and targets already use the merged REPO::id names
+	n=$home/_notes/graph.json
+	if [ -s "$n" ] && command -v jq > /dev/null; then
+		jq -c --slurpfile n "$n" '.nodes += $n[0].nodes | .links += $n[0].links' "$out" > "$out.tmp" && mv "$out.tmp" "$out"
+	fi
+	echo "merged ${#gs[@]} graphs -> $out"
+	exit 0
 fi
 
 if [ $mode = hook ]; then

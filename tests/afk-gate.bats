@@ -169,3 +169,31 @@ stop_t() { printf '{"hook_event_name":"Stop","transcript_path":"%s"}' "$1" | "$G
 	[[ $output == *"real next thing"* ]]
 	[[ $output != *"waits for an answer"* ]]
 }
+
+@test "auto: a message typed while Claude works (queued_command attachment) ends the wait too" {
+	t=$(transcript 0)
+	"$G" auto 10s
+	( sleep 2; printf '{"type":"attachment","attachment":{"type":"queued_command","origin":{"kind":"human"}},"timestamp":"%s"}\n' \
+		"$(date -u -d '+3 sec' +%Y-%m-%dT%H:%M:%S.000Z)" >> "$t" ) &
+	AFK_GATE_WAIT=20 AFK_GATE_POLL=1 run stop_t "$t"
+	[ "$status" -eq 0 ]
+}
+
+@test "auto: blocked again and again within seconds: the third quick repeat lets Claude stop instead of spamming" {
+	t=$(transcript 0)
+	"$G" auto 1s
+	export AFK_GATE_WAIT=20 AFK_GATE_POLL=1
+	run stop_t "$t"; [ "$status" -eq 2 ]
+	run stop_t "$t"; [ "$status" -eq 2 ]
+	run stop_t "$t"; [ "$status" -eq 2 ]
+	run stop_t "$t"; [ "$status" -eq 0 ]
+}
+
+@test "a line marked (note) is not a task" {
+	printf '(note) just a description\nreal task\n' > "$AFK_GATE_TODO"
+	"$G" on 1h
+	run "$G" < <(echo '{"session_id":"s"}')
+	[ "$status" -eq 2 ]
+	[[ $output == *"real task"* ]]
+	[[ $output != *"just a description"* ]]
+}

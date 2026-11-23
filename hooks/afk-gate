@@ -10,7 +10,7 @@
 #
 # As the hook (no arguments, the Stop event's JSON on stdin): with neither mode on, expired or past the cap - exit 0,
 # Claude may stop. In auto mode the hook looks at the transcript (path in the JSON): the last entry written by a
-# human (origin.kind "human"; task notifications, hand-backs and tool results do not count) gives the idle time.
+# human (origin.kind "human", also a message typed while Claude works, which is stored as an attachment; task notifications, hand-backs and tool results do not count) gives the idle time.
 # The hook only runs when Claude stops, so Claude is idle by definition; it then waits IDLE (poll every
 # AFK_GATE_POLL=5 s; the hook timeout in settings.json must be longer than IDLE) for a message from him. One
 # arrives: exit 0, he is here. None: the stop is blocked. His silence is counted from the moment Claude stopped, never
@@ -62,7 +62,7 @@ last_human() {	# last_human TRANSCRIPT -> epoch ms of his newest message in ANY 
 	[ -r "${1:-}" ] || return 1
 	while IFS= read -r f; do
 		[ -r "$f" ] || continue
-		ts=$(tail -c 4000000 "$f" | jq -R -r 'fromjson? | select(.type == "user" and .origin.kind == "human") | .timestamp' 2> /dev/null | tail -n 1)
+		ts=$(tail -c 4000000 "$f" | jq -R -r 'fromjson? | select((.type == "user" and .origin.kind == "human") or (.type == "attachment" and .attachment.origin.kind == "human")) | .timestamp' 2> /dev/null | tail -n 1)
 		[ -n "$ts" ] || continue
 		ts=$(date -d "$ts" +%s%3N 2> /dev/null) || continue
 		[ -z "$best" ] || [ "$ts" -gt "$best" ] && best=$ts
@@ -88,7 +88,7 @@ auto)
 	mkdir -p "$dir" || exit 2
 	echo "$s" > "$dir/idle"
 	echo 0 > "$dir/count"
-	rm -f -- "$dir"/blocked_at.*
+	rm -f -- "$dir"/blocked_at.* "$dir"/quick.*
 	echo "afk-gate: auto, after $((s / 60)) min ($s s) of silence from you Claude cannot stop while todo.md has open lines ($todo)"
 	exit 0 ;;
 on)
@@ -99,7 +99,7 @@ on)
 	echo "afk-gate: forced for $((s / 60)) minutes; Claude cannot stop while todo.md has open lines ($todo)"
 	exit 0 ;;
 off)
-	rm -f -- "$dir/until" "$dir/idle" "$dir"/blocked_at.* 2> /dev/null
+	rm -f -- "$dir/until" "$dir/idle" "$dir"/blocked_at.* "$dir"/quick.* 2> /dev/null
 	echo "afk-gate: off"
 	exit 0 ;;
 status)
@@ -126,7 +126,7 @@ if [ "$n" -ge "$max" ]; then
 	echo "afk-gate: $n stops blocked and AFK mode ran into its cap, so it is off now; Claude may stop." >&2
 	exit 1
 fi
-next=$(grep -vE '^[[:space:]]*(#|$)|zrobione|[Dd]one|[Bb]locked|\[\?\]|^\[x\]' "$todo" 2> /dev/null | sed -n '1p' | cut -c1-300)
+next=$(grep -vE '^[[:space:]]*(#|$)|zrobione|[Dd]one|[Bb]locked|\[\?\]|\(note\)|^\[x\]' "$todo" 2> /dev/null | sed -n '1p' | cut -c1-300)
 [ -n "$next" ] || exit 0	# nothing open: stopping is fine
 
 why="forced, $((l / 60)) minutes left"
@@ -151,7 +151,21 @@ if [ "$l" -le 0 ]; then	# auto: act only when neither of us has done anything fo
 	fi
 	why="auto, nobody did anything for $((idle / 60)) min"
 fi
-[ -n "${sid:-}" ] && date +%s%3N > "$dir/blocked_at.$sid"
+# Brake against spam: blocked again within QUICK seconds of the last block, QUICK_MAX times in a row = Claude has nothing
+# it can do (blocked item, broken tool): let it stop instead of repeating the same message. He writes again, it resumes.
+nowms=$(date +%s%3N)
+quick=${AFK_GATE_QUICK:-120} quick_max=${AFK_GATE_QUICK_MAX:-3}
+if [ -n "${sid:-}" ]; then
+	lb=$(cat "$dir/blocked_at.$sid" 2> /dev/null || echo 0)
+	q=$(cat "$dir/quick.$sid" 2> /dev/null || echo 0)
+	if [ "$lb" -gt 0 ] && [ $(((nowms - lb) / 1000)) -lt "$quick" ]; then q=$((q + 1)); else q=0; fi
+	if [ "$q" -ge "$quick_max" ]; then
+		echo 0 > "$dir/quick.$sid"; echo "$nowms" > "$dir/blocked_at.$sid"
+		exit 0
+	fi
+	echo "$q" > "$dir/quick.$sid"
+	echo "$nowms" > "$dir/blocked_at.$sid"
+fi
 echo $((n + 1)) > "$dir/count"
 {
 	printf 'AFK mode is on (%s). Blocked stops so far: %d (safety brake at %d). He is away and wants work to continue: do real work, do not stop, do not ask, and do not repeat that you are blocked or out of limit.\n' \

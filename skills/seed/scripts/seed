@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+# seed - start a new project (or skill) from a GitHub repo as a seed: a shallow clone with no history, renamed,
+# with his conventions - README with an Origin section, ./test, ./install, MIT licence beside the upstream one.
+#
+# usage: seed [-s] [-f] [-d DIR] SOURCE NAME
+#   SOURCE  owner/repo, a git URL, or a local git repo; SOURCE//path takes only that folder of the repo
+#   NAME    the new project, [a-z0-9_-], at least 3 characters; created as DIR/NAME
+#   -s      the seed is a skill: SKILL.md gets name NAME and metadata upstream "repo@commit"
+#   -f      seed even when the licence is copyleft (GPL, AGPL, LGPL, MPL, EPL); the upstream licence is kept
+#           untouched and nothing is relicensed. Without -f such a repo is refused, as is one with no licence.
+#   -d DIR  parent directory (default: the current one)
+# Steps: clone --depth 1 (SOURCE as it is today, no history), drop .git, read the licence, rename the old name in
+# file names and contents (old, Old, OLD and the - to _ variants; LICENSE, NOTICE and COPYING files are left as
+# written), write README Origin, LICENSE, ./test and ./install when the seed has none, git init and ONE commit
+# "feat: seed from NAME@sha". Nothing is pushed. The old name is the repo (or folder) name; a URL that holds it
+# in a file is left as it is.
+# Licence: MIT, BSD, ISC, 0BSD, Unlicense -> his MIT first, the upstream text below it; Apache-2.0 stays Apache-2.0 with a
+# NOTICE; copyleft or unknown -> refused. Holder of the copyright: $SEED_HOLDER, else git config user.name.
+# Exit 0 done, 1 refused or failed, 2 bad usage.
+
+# shellcheck disable=SC2016  # single quotes are deliberate where text is written into the generated scripts
+case ${1:-} in -h | --help) awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;; esac
+set -u
+
+die() { echo "seed: $*" >&2; exit "${2:-1}"; }
+usage() { awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0" >&2; exit 2; }
+
+skill=0 force=0 parent=.
+while getopts sfd: o; do
+	case $o in s) skill=1 ;; f) force=1 ;; d) parent=$OPTARG ;; *) usage ;; esac
+done
+shift $((OPTIND - 1))
+[ $# -eq 2 ] || usage
+src=$1 new=$2
+[[ $new =~ ^[a-z0-9_-]{3,}$ ]] || die "bad name '$new' (lower case letters, digits, - and _, at least 3)" 2
+command -v git > /dev/null || die "git not found"
+[ -d "$parent" ] || die "no directory $parent"
+dest=$parent/$new
+[ -e "$dest" ] && die "$dest exists"
+
+sub=""
+if [[ $src =~ ^(.+[^:])//([^/].*)$ ]]; then base=${BASH_REMATCH[1]} sub=${BASH_REMATCH[2]%/}; else base=$src; fi
+if [ -d "$base" ]; then url=file://$(cd "$base" && pwd) label=$(basename "$(cd "$base" && pwd)")
+elif [[ $base =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then url=https://github.com/$base label=${base#*/}
+else url=$base label=$(basename "$base")
+fi
+label=${label%.git}
+
+tmp=$(mktemp -d) || die "no temp directory"
+trap 'rm -rf -- "$tmp"' EXIT
+git clone -q --depth 1 "$url" "$tmp/repo" 2> "$tmp/err" || die "cannot clone $url: $(tail -n 1 "$tmp/err")"
+sha=$(git -C "$tmp/repo" rev-parse --short HEAD)
+root=$tmp/repo
+[ -z "$sub" ] || { [ -d "$root/$sub" ] || die "no folder $sub in $base"; }
+srcdir=$root${sub:+/$sub}
+old=$label
+[ -z "$sub" ] || old=$(basename "$sub")
+if [ "$skill" = 1 ]; then
+	[ -f "$srcdir/SKILL.md" ] || die "-s: no SKILL.md in ${sub:-the repo root}"
+	n=$(awk '/^name:/ { sub(/^name:[ \t]*/, ""); gsub(/["'\'']/, ""); print; exit }' "$srcdir/SKILL.md")
+	[ -z "$n" ] || old=$n
+fi
+[[ $old =~ ^[A-Za-z0-9_.-]+$ ]] || die "cannot rename from '$old'"
+old=${old//./-}
+
+# --- the licence, before anything is created
+licfile=""
+for f in "$srcdir" "$root"; do
+	for c in LICENSE LICENSE.md LICENSE.txt COPYING COPYING.md UNLICENSE; do
+		[ -f "$f/$c" ] && { licfile=$f/$c; break 2; }
+	done
+done
+kind=none
+if [ -n "$licfile" ]; then
+	if grep -qiE 'GNU (AFFERO|LESSER|LIBRARY)? ?(GENERAL )?PUBLIC LICENSE|GNU GENERAL PUBLIC|Mozilla Public License|Eclipse Public License' "$licfile"; then kind=copyleft
+	elif grep -qiE 'Apache License' "$licfile"; then kind=apache
+	elif grep -qiE 'Permission is hereby granted, free of charge|Redistribution and use in source and binary|Permission to use, copy, modify|unencumbered software|Zero-Clause|0BSD|MIT License|BSD' "$licfile"; then kind=permissive
+	else kind=unknown
+	fi
+fi
+case $kind in
+none) die "no licence file in $label: all rights reserved, so it cannot be copied. Ask the author, or write it from scratch" ;;
+unknown) [ "$force" = 1 ] || die "unrecognised licence in $(basename "$licfile"): read it, and use -f if it allows this" ;;
+copyleft) [ "$force" = 1 ] || die "copyleft licence ($(basename "$licfile")): copying it would put your project under it. -f keeps it as it is" ;;
+esac
+
+# --- copy without history
+mkdir -p "$dest" || die "cannot create $dest"
+( cd "$srcdir" && tar --exclude=.git -cf - . ) | ( cd "$dest" && tar -xf - ) || die "copy failed"
+rm -rf -- "$dest/.git"
+
+# --- rename: contents, then names (deepest first)
+vars() {	# vars NAME -> the six spellings, one per line: as is, Capitalised, UPPER, and the same with - as _
+	local n=$1 u=${1//-/_}
+	printf '%s\n' "$n" "${n^}" "${n^^}" "$u" "${u^}" "${u^^}"
+}
+mapfile -t from < <(vars "$old")
+mapfile -t to < <(vars "$new")
+script="" alt="" map=""
+for i in "${!from[@]}"; do
+	script+="s/${from[$i]}/${to[$i]}/g;"
+	alt+="${alt:+|}${from[$i]}"
+	map+="'${from[$i]}'=>'${to[$i]}',"
+done
+# In contents a URL is left as it is (it points at the original, or at nothing), the old name elsewhere is replaced.
+perlcode="BEGIN{%m=($map)} s{(https?://[^\\s)>\\]\"']+)|($alt)}{defined \$1 ? \$1 : \$m{\$2}}ge"
+while IFS= read -r -d '' f; do
+	case $(basename "$f") in LICENSE* | COPYING* | NOTICE* | UNLICENSE*) continue ;; esac
+	grep -qI . "$f" 2> /dev/null && grep -qE "$alt" "$f" && perl -pi -e "$perlcode" "$f"
+done < <(find "$dest" -type f -print0)
+while IFS= read -r -d '' p; do
+	b=$(basename "$p")
+	nb=$(printf '%s' "$b" | sed "$script")
+	[ "$nb" = "$b" ] || mv -- "$p" "$(dirname "$p")/$nb"
+done < <(find "$dest" -depth -mindepth 1 -print0)
+
+# --- skill header
+if [ "$skill" = 1 ]; then
+	f=$dest/SKILL.md
+	sed -i "0,/^name:.*/s//name: $new/" "$f"
+	if grep -q '^  upstream:' "$f"; then sed -i "s|^  upstream:.*|  upstream: \"$label@$sha\"|" "$f"
+	elif grep -q '^metadata:' "$f"; then sed -i "0,/^metadata:/s||metadata:\n  upstream: \"$label@$sha\"|" "$f"
+	else sed -i "0,/^description:.*/s||&\nmetadata:\n  upstream: \"$label@$sha\"|" "$f"
+	fi
+fi
+
+# --- licence files
+holder=${SEED_HOLDER:-$(git config user.name 2> /dev/null || true)}
+[ -n "$holder" ] || holder=$(id -un)
+year=$(date +%Y)
+upstream_lic=$dest/$(basename "$licfile")
+case $kind in
+permissive)
+	{
+		printf 'MIT License\n\nCopyright (c) %s %s\n\n' "$year" "$holder"
+		printf 'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and\n'
+		printf 'associated documentation files (the "Software"), to deal in the Software without restriction, including\n'
+		printf 'without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n'
+		printf 'copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the\n'
+		printf 'following conditions:\n\n'
+		printf 'The above copyright notice and this permission notice shall be included in all copies or substantial\n'
+		printf 'portions of the Software.\n\n'
+		printf 'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT\n'
+		printf 'LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO\n'
+		printf 'EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN\n'
+		printf 'AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE\n'
+		printf 'OR OTHER DEALINGS IN THE SOFTWARE.\n\n'
+		printf -- '----\n\nThis project began as a copy of %s (commit %s). Its licence, which still applies to the code taken from it:\n\n' "$label" "$sha"
+		cat "$licfile"
+	} > "$tmp/LICENSE.new"
+	[ "$upstream_lic" = "$dest/LICENSE" ] || rm -f -- "$upstream_lic"
+	mv -- "$tmp/LICENSE.new" "$dest/LICENSE" ;;
+apache)
+	[ -f "$dest/LICENSE" ] || cp -- "$licfile" "$dest/LICENSE"
+	printf '%s\n\nThis project began as a copy of %s (commit %s), licensed under the Apache License 2.0 (see LICENSE).\nChanges since: renamed %s to %s, and everything added after that; Copyright (c) %s %s.\n' \
+		"$new" "$label" "$sha" "$old" "$new" "$year" "$holder" >> "$dest/NOTICE" ;;
+esac
+
+# --- README
+readme=$dest/README.md
+[ "$skill" = 1 ] && readme=""
+if [ -n "$readme" ]; then
+	[ -f "$readme" ] || printf '# %s\n\nTODO: what it is in one paragraph, build and run commands (each one run), real output, status, licence (conventions: readme).\n' "$new" > "$readme"
+	{
+		printf '\n## Origin\n\nBegan as a copy of %s (commit %s, no history kept) and renamed from `%s` to `%s`.\n' "$label" "$sha" "$old" "$new"
+		case $kind in
+		permissive) printf 'Licence: MIT; the upstream licence text stays in LICENSE, below ours.\n' ;;
+		apache) printf 'Licence: Apache-2.0, as upstream; see LICENSE and NOTICE.\n' ;;
+		*) printf 'Licence: the upstream one, unchanged (see LICENSE).\n' ;;
+		esac
+	} >> "$readme"
+fi
+
+# --- ./test and ./install, from what the seed has; a script the seed brought is kept
+detect() {	# detect test|install -> the command for this project, empty when there is none
+	local want=$1 d=$dest
+	if [ "$want" = test ]; then
+		if [ -f "$d/Makefile" ] && grep -qE '^test:' "$d/Makefile"; then echo "make test"
+		elif [ -f "$d/Cargo.toml" ]; then echo "cargo test"
+		elif [ -f "$d/go.mod" ]; then echo "go test ./..."
+		elif [ -f "$d/package.json" ] && grep -q '"test"' "$d/package.json"; then echo "npm test"
+		elif compgen -G "$d/tests/*.bats" > /dev/null; then echo "bats tests"
+		elif [ -f "$d/pyproject.toml" ] || [ -f "$d/pytest.ini" ] || compgen -G "$d/test_*.py" > /dev/null; then echo "python3 -m pytest"
+		fi
+	else
+		if [ -f "$d/Makefile" ] && grep -qE '^install:' "$d/Makefile"; then echo 'make install PREFIX="${PREFIX:-$HOME/.local}"'
+		elif [ -f "$d/Cargo.toml" ] && { [ -f "$d/src/main.rs" ] || grep -q '^\[\[bin\]\]' "$d/Cargo.toml"; }; then echo 'cargo install --path . --root "${PREFIX:-$HOME/.local}"'
+		elif [ -f "$d/go.mod" ] && grep -rlq '^package main' --include='*.go' "$d" 2> /dev/null; then echo 'GOBIN="${PREFIX:-$HOME/.local}/bin" go install ./...'
+		fi
+	fi
+}
+script_for() {	# script_for test|install
+	local want=$1 cmd f=$dest/$1
+	[ -e "$f" ] && { echo "kept the seed's own ./$want" >&2; return; }
+	cmd=$(detect "$want")
+	# ./test next to a Makefile "test:" target would make make think the target is up to date
+	case $cmd in make*) printf '\n.PHONY: %s\n' "$want" >> "$dest/Makefile" ;; esac
+	{
+		echo '#!/usr/bin/env bash'
+		if [ "$want" = test ]; then echo "# test - run the tests of $new. No arguments."; else echo "# install - install $new for this user (PREFIX, default ~/.local). No arguments."; fi
+		echo 'set -eu'
+		echo 'cd "$(dirname "$(readlink -f "$0")")"'
+		echo '[ $# -eq 0 ] || { echo "'"$want"': takes no arguments" >&2; exit 2; }'
+		if [ -n "$cmd" ]; then echo "exec $cmd"
+		elif [ "$want" = test ]; then echo 'echo "test: no tests yet, add some" >&2; exit 1'
+		else echo 'echo "install: nothing to install yet, write this script" >&2; exit 1'
+		fi
+	} > "$f"
+	chmod +x "$f"
+}
+if [ "$skill" = 0 ]; then script_for test; script_for install; fi
+
+# --- one commit
+git -C "$dest" init -q -b main 2> /dev/null || git -C "$dest" init -q
+git -C "$dest" add -A
+if git -C "$dest" commit -qm "feat: seed from $label@$sha"; then c="one commit"; else c="not committed (no git identity?): run git commit yourself"; fi
+echo "seed: $dest from $label@$sha (licence: $kind), renamed $old -> $new, $c"
+[ "$kind" = permissive ] || [ "$kind" = apache ] || echo "seed: upstream licence kept as it is; read it before you publish" >&2
+echo "seed: next: fill in the README, run ./test"

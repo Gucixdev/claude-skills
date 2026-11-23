@@ -90,6 +90,7 @@ niż na dysku kisić"):
 - `paying-demand` #business #thinking #decisions #scraping #mobile
 - `rea` #thirdparties #reverse-engineering #binaries #formats #protocols #hardware #security #ui #gamedev #leanctx #context #tokens #dev
 - `scrape-everything` #thirdparties #scraping #web #data #api #automation #dev
+- `seed` #scaffold #github #license #skills #dev
 - `ship-anything` #ship #release #publishing #business #dev #pack #build #linux
 - `ui` #thirdparties #ui #ux #tui #cli #design #animation #dev #webdev #web #html #css #wasm #typescript #media #images #video #audio #fonts #3d #imagemagick #ffmpeg #assimp
 - `which-license` #license #legal #publish #thirdparties #dev

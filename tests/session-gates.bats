@@ -88,6 +88,13 @@ tool() { jq -cn --arg n "$1" --arg f "$2" '{type:"assistant",message:{content:[{
 	[ "$status" -eq 0 ]
 }
 
+@test "memorize-gate: the continuation summary after a compaction is not a correction" {
+	user "zrob hooki"
+	user "This session is being continued from a previous conversation that ran out of context. The user said wrong and I said no, znowu."
+	run "$H/memorize-gate" < <(ev Stop)
+	[ "$status" -eq 0 ]
+}
+
 @test "memorize-gate: a lesson in a skill or the memory after the correction lets Claude stop" {
 	user "nie, to zle"
 	tool Edit "/x/claude-config/skills/rules/references/clarify.md"

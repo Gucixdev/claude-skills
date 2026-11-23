@@ -29,9 +29,9 @@ mkdir -p "$state" 2> /dev/null || exit 0
 
 # the transcript as lines: "U<TAB>N<TAB>text" for his messages, "W<TAB>N" for a lesson written (N: the JSONL line)
 stream=$(jq -R -r 'fromjson? // empty
-	| if .type == "user" and (.isMeta | not) then
+	| if .type == "user" and (.isMeta | not) and ((.isCompactSummary // false) | not) then
 		(.message.content | if type == "string" then . elif type == "array" then ([.[] | select(.type == "text") | .text] | join(" ")) else "" end) as $t
-		| if ($t | length) > 0 and ($t | test("^\\s*<(command|local-command|system-reminder|task-notification)") | not)
+		| if ($t | length) > 0 and ($t | test("^\\s*(<(command|local-command|system-reminder|task-notification)|This session is being continued from a previous conversation)") | not)
 		  then "U\t\(input_line_number)\t\($t | gsub("[\t\n\r]"; " "))" else empty end
 	  elif .type == "assistant" then
 		.message.content[]? | select(.type == "tool_use")

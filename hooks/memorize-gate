@@ -36,6 +36,7 @@ stream=$(jq -R -r 'fromjson? // empty
 	  elif .type == "assistant" then
 		.message.content[]? | select(.type == "tool_use")
 		| select((.name | test("^mcp__memory__memory_(write|str_replace|append)$"))
+			or (.name == "Bash" and ((.input.command // "") | test("(>|tee |sed -i|cp |mv |python3? ).*(/(skills|memory)/|CLAUDE\\.md|/\\.claude/)")))
 			or ((.name | test("^(Edit|Write|MultiEdit)$"))
 				and ((.input.file_path // "") | test("(^|/)(skills|memory)/|(^|/)CLAUDE\\.md$|(^|/)\\.claude/"))))
 		| "W\t\(input_line_number)"

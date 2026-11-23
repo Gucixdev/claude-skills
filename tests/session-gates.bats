@@ -106,6 +106,17 @@ tool() { jq -cn --arg n "$1" --arg f "$2" '{type:"assistant",message:{content:[{
 	[ "$status" -eq 0 ]
 }
 
+@test "memorize-gate: a lesson written through Bash into memory/ or skills/ counts" {
+	user "mowilem ze bez malloca"
+	jq -cn '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:"cat > ~/.claude/projects/x/memory/feedback_a.md <<EOF\nlesson\nEOF"}}]}}' >> "$T/tr.jsonl"
+	run "$H/memorize-gate" < <(ev Stop)
+	[ "$status" -eq 0 ]
+	user "znowu zle"
+	jq -cn '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:"ls memory/"}}]}}' >> "$T/tr.jsonl"
+	run "$H/memorize-gate" < <(ev Stop)
+	[ "$status" -eq 2 ]
+}
+
 @test "memorize-gate: no correction, wrappers and an edit of ordinary code do not count" {
 	user "to dawaj lecisz"
 	user "no właśnie, o to chodzi"

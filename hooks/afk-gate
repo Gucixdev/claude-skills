@@ -20,7 +20,8 @@
 # session wrote something in the last AFK_GATE_BUSY=90 s (it is working, or he is typing there) nobody is idle: exit 0. A stop that is blocked is counted and exit 2 sends
 # Claude back to work with the first open item of todo.md. The cap (default 300 blocked stops, AFK_GATE_MAX) is the
 # brake against a loop that makes no progress; at the cap the mode switches itself off and the reason is shown to him.
-# An item is open unless the line holds "zrobione", "done" or "blocked". No transcript, no timestamp: no block.
+# An item is open unless the line holds "zrobione", "done" or "blocked", starts with [x] (ticked) or holds [?] (waits
+# for his answer in questions.md). No transcript, no timestamp: no block.
 # State: ${AFK_GATE_DIR:-~/.local/state/afk-gate}/{until,idle,count}. The todo file is AFK_GATE_TODO
 # (default $CLAUDE_CONFIG/todo.md). Exit status as a command: 0 fine, 2 bad usage.
 
@@ -125,7 +126,7 @@ if [ "$n" -ge "$max" ]; then
 	echo "afk-gate: $n stops blocked and AFK mode ran into its cap, so it is off now; Claude may stop." >&2
 	exit 1
 fi
-next=$(grep -vE '^[[:space:]]*(#|$)|zrobione|[Dd]one|[Bb]locked' "$todo" 2> /dev/null | sed -n '1p' | cut -c1-300)
+next=$(grep -vE '^[[:space:]]*(#|$)|zrobione|[Dd]one|[Bb]locked|\[\?\]|^\[x\]' "$todo" 2> /dev/null | sed -n '1p' | cut -c1-300)
 [ -n "$next" ] || exit 0	# nothing open: stopping is fine
 
 why="forced, $((l / 60)) minutes left"

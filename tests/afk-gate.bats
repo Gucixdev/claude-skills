@@ -160,3 +160,12 @@ stop_t() { printf '{"hook_event_name":"Stop","transcript_path":"%s"}' "$1" | "$G
 	run "$G" auto x
 	[ "$status" -eq 2 ]
 }
+
+@test "a [x] line and a [?] line are not open; the next plain line comes back" {
+	printf '# todo\n[x] ticked thing\n[?] waits for an answer (questions.md)\nthing with [?] inside\nreal next thing\n' > "$AFK_GATE_TODO"
+	run "$G" on 1h
+	run "$G" < <(echo '{"session_id":"s"}')
+	[ "$status" -eq 2 ]
+	[[ $output == *"real next thing"* ]]
+	[[ $output != *"waits for an answer"* ]]
+}

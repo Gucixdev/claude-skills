@@ -339,3 +339,12 @@ result() { jq -cn --arg id "$1" --argjson e "$2" '{type: "user", message: {conte
 	run "$H/xd_gate" < <(pre Bash "$(jq -cn '{command: "echo xD"}')")
 	[ -z "$output" ]
 }
+
+@test "publish_gate: a token in a tracked file refuses the push" {
+	printf 'LICENSE\n' > "$R/LICENSE"; printf '# x\n' > "$R/README.md"
+	printf 'k=ghp_%s\n' "$(printf 'a%.0s' $(seq 36))" > "$R/conf"
+	git -C "$R" add . && git -C "$R" commit -qm c
+	run env PUBLISH_GATE_TESTS=0 "$H/publish_gate" < <(pre Bash '{"command":"git push"}')
+	[ "$status" -eq 2 ]
+	[[ $output == *"looks like a secret"* ]]
+}

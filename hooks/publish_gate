@@ -6,6 +6,7 @@
 #   - README.md exists, is at most 100 lines and has no "xD";
 #   - no tracked file carries the local login name ($USER) or the home folder ($HOME) - identity and machine paths
 #     never go public (rules (identity)); the scan is git grep over tracked files, the first hits are listed;
+#   - no tracked file holds something that looks like a key or token (the secret-guard patterns, over git grep);
 #   - the tests pass when there is something to run (./check, ./test, tests/*.bats): run here, 120 s at most.
 # Any failure refuses the command (exit 2) with the list. A remote matching $PUSH_GATE_ALLOW (his private backup
 # repo, the same setting push-gate has) is not checked: it is not public. PUBLISH_GATE_TESTS=0 skips the test run;
@@ -43,6 +44,12 @@ $(printf '%s\n' "$hits" | sed 's/^/    /' | cut -c1-160)"
 who=$(git -C "$root" grep -I -l -w -F -e "$me" -- . ':!*.bats' 2> /dev/null | head -5)
 [ -z "$who" ] || bad+="
   the local login name is in: $(printf '%s' "$who" | tr '\n' ' ')"
+secrets=$(git -C "$root" grep -I -n -E -e '-----BEGIN ([A-Z]+ )?PRIVATE KEY' -e '(^|[^A-Za-z0-9])AKIA[0-9A-Z]{16}([^A-Za-z0-9]|$)' \
+	-e '(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,}' -e 'gsk_[A-Za-z0-9]{40,}' \
+	-e '(^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{32,}' -e 'xox[baprs]-[A-Za-z0-9-]{20,}' -e '(^|[^A-Za-z0-9])hf_[A-Za-z0-9]{34,}' \
+	-e 'AIza[0-9A-Za-z_-]{35}' -- . ':!*.bats' 2> /dev/null | grep -viE 'example|fake|dummy|placeholder|x{6,}' | cut -d: -f1,2 | head -5)
+[ -z "$secrets" ] || bad+="
+  something that looks like a secret (same patterns as secret-guard) in: $(printf '%s' "$secrets" | tr '\n' ' ')"
 if [ "${PUBLISH_GATE_TESTS:-1}" != 0 ]; then
 	run=''
 	for c in check test; do [ -x "$root/$c" ] && { run=./$c; break; }; done
@@ -56,4 +63,4 @@ $(printf '%s\n' "$out" | tail -5 | sed 's/^/    /' | cut -c1-160)"
 fi
 [ -n "$bad" ] || exit 0
 sg_block "publish_gate: $(basename -- "$root") is not ready to leave the machine:$bad
-Fix these, then run the command again. (A private backup remote in PUSH_GATE_ALLOW is not checked.)"
+Fix these (the full list: ~/.claude/skills/publish-anything/scripts/publish-check), then run the command again. (A private backup remote in PUSH_GATE_ALLOW is not checked.)"

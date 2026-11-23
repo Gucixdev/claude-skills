@@ -23,7 +23,7 @@ result() { jq -cn --arg id "$1" --argjson e "$2" '{type: "user", message: {conte
 @test "smartgates alone lists the gates" {
 	run "$H/smartgates"
 	[ "$status" -eq 0 ]
-	for g in karpathy_gate knowsunknown_gate evolve_gate debug_gate test_gate caveman_gate leanctx_gate ponytail_gate graphify_gate mybashtoolgate readmegate updatedocsgate publish_gate tokenlimitgate; do
+	for g in karpathy_gate knowsunknown_gate evolve_gate debug_gate test_gate caveman_gate leanctx_gate ponytail_gate graphify_gate mybashtoolgate readmegate updatedocsgate publish_gate xd_gate tokenlimitgate; do
 		[[ $output == *"$g"* ]]
 	done
 }
@@ -320,4 +320,22 @@ result() { jq -cn --arg id "$1" --argjson e "$2" '{type: "user", message: {conte
 	user "co to robi"; say "It lists files."
 	run "$H/karpathy_gate" < <(ev)
 	[ "$status" -eq 0 ]
+}
+
+@test "xd_gate: xD is cut from commit, PR and README text, notes and look-alike words stay" {
+	run "$H/xd_gate" < <(pre Bash "$(jq -cn '{command: "git commit -m \"fix it xD\""}')")
+	[ "$status" -eq 0 ]
+	[ "$(jq -r '.hookSpecificOutput.updatedInput.command' <<< "$output")" = 'git commit -m "fix it"' ]
+	run "$H/xd_gate" < <(pre Bash "$(jq -cn '{command: "gh pr create --title \"Xd works XD\" --body ok"}')")
+	[ "$(jq -r '.hookSpecificOutput.updatedInput.command' <<< "$output")" = 'gh pr create --title "Xd works" --body ok' ]
+	run "$H/xd_gate" < <(pre Write "$(jq -cn --arg f "$R/README.md" '{file_path: $f, content: "# x\nworks xD\n"}')")
+	[ "$(jq -r '.hookSpecificOutput.updatedInput.content' <<< "$output")" = $'# x\nworks' ]
+	run "$H/xd_gate" < <(pre Edit "$(jq -cn --arg f "$R/docs/a.md" '{file_path: $f, old_string: "a", new_string: "b xd"}')")
+	[ "$(jq -r '.hookSpecificOutput.updatedInput.new_string' <<< "$output")" = b ]
+	run "$H/xd_gate" < <(pre Write "$(jq -cn --arg f "$R/todo.md" '{file_path: $f, content: "a xD\n"}')")
+	[ -z "$output" ]
+	run "$H/xd_gate" < <(pre Bash "$(jq -cn '{command: "git commit -m \"use xdg-open and xdotool, edit file.xd\""}')")
+	[ -z "$output" ]
+	run "$H/xd_gate" < <(pre Bash "$(jq -cn '{command: "echo xD"}')")
+	[ -z "$output" ]
 }

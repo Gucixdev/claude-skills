@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# xd_gate - Claude Code PreToolUse hook: what leaves the machine carries no "xD". It removes xD/xd/XD/Xd (with the space
+# before it) from the text of a Bash call that publishes - git commit/push/tag, gh pr/release/issue/repo - and from the
+# text of a Write/Edit/MultiEdit to a README, CHANGELOG or a file under docs/ - commit messages, PR and release text,
+# README, documentation. His own notes (braindump, todo, questions, issues) are not touched. The cleaned input goes
+# on through updatedInput; the normal permission flow still decides whether the call runs. Words that merely contain
+# the letters (xdg-open, xdotool, file.xd) stay.
+#
+# XD_GATE=off disables it. Needs jq; without it the hook does nothing.
+# Enable (you, in settings.json): hooks.PreToolUse, matcher "Bash|Write|Edit|MultiEdit".
+
+# shellcheck source=/dev/null disable=SC2154
+. "$(dirname "$(readlink -f "$0")")/smartgates"
+sg_init
+[ "${XD_GATE:-on}" = off ] && exit 0
+tool=$(printf '%s' "$input" | jq -r '.tool_name // empty')
+re='([ \t]+|^)[xX][dD]+(?![[:alnum:]_-]|\.[[:alnum:]])'
+# shellcheck disable=SC2016
+case $tool in
+Bash)
+	cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
+	printf '%s' "$cmd" | grep -qE '(^|[;&|[:space:]])(git[[:space:]]+(-C[[:space:]]+[^[:space:]]+[[:space:]]+)?(commit|push|tag)|gh[[:space:]]+(pr|release|issue|repo))([[:space:]]|$)' || exit 0
+	filter='.tool_input | .command |= gsub($re; "")'
+	;;
+Write | Edit | MultiEdit)
+	f=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
+	case ${f##*/} in braindump* | todo* | questions* | issues*) exit 0 ;; esac
+	case ${f##*/} in README* | readme* | CHANGELOG*) ;; *) case $f in */docs/*) ;; *) exit 0 ;; esac ;; esac
+	filter='.tool_input | (if .content then .content |= gsub($re; "") else . end)
+		| (if .new_string then .new_string |= gsub($re; "") else . end)
+		| (if .edits then .edits |= map(if .new_string then .new_string |= gsub($re; "") else . end) else . end)'
+	;;
+*) exit 0 ;;
+esac
+new=$(printf '%s' "$input" | jq -c --arg re "$re" "$filter") || exit 0
+[ "$new" != "$(printf '%s' "$input" | jq -c '.tool_input')" ] || exit 0
+jq -cn --argjson i "$new" '{hookSpecificOutput: {hookEventName: "PreToolUse", updatedInput: $i}}'

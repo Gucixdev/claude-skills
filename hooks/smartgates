@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # smartgates - the shared part of the smart hooks (debug_gate, test_gate, caveman_gate, leanctx_gate, ponytail_gate,
-# graphify_gate, mybashtoolgate, readmegate, updatedocsgate, publish_gate, tokenlimitgate, knowsunknown_gate,
+# graphify_gate, mybashtoolgate, readmegate, updatedocsgate, publish_gate, xd_gate, tokenlimitgate, knowsunknown_gate,
 # evolve_gate): they source this file;
 # it is never wired into settings.json. Run on its own it lists the gates with their first line.
 #

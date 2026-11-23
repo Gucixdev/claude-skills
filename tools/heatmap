@@ -1,50 +1,129 @@
 #!/usr/bin/env bash
-# heatmap - when you and Claude work: weekday x hour grids and a per-month table, read from the session
-# transcripts (~/.claude/projects/*/*.jsonl). Local time. Nothing is written or sent anywhere.
+# heatmap - when you and Claude work, who did it, and which tools, skills and hooks are used. Read from the session
+# transcripts (~/.claude/projects, subagent transcripts included). Local time. Nothing is written or sent anywhere.
 #
-#   tools/heatmap            your prompts and Claude's replies, all projects
+#   tools/heatmap            weekday x hour grids (your prompts, the replies), who wrote what, models, per month
+#   tools/heatmap -b PERIOD  the timeline per hour, day, month or year (default month)
+#   tools/heatmap -u         used / unused / running for every tool, skill and hook of this repo, in the period
 #   tools/heatmap -p NAME    only projects whose folder name contains NAME
 #   tools/heatmap -d DAYS    only the last DAYS days
 #   tools/heatmap -h         this text
 #
-# "prompt" = a message you typed (origin.kind human), "reply" = one assistant message. Cells are shaded by
-# share of the busiest cell; the number is the count. Exit 2 on bad usage, 1 when no transcript is found.
+# Who: you = a message you typed (origin.kind human); agent = an assistant message of the main session; subagent = one from
+# a subagent transcript (isSidechain). Models are counted per assistant message. Usage: a tool is "used" when a Bash command
+# of the period names it, a skill when the Skill tool was called with it, a hook when the transcript records it running;
+# "running" = a process of it exists now (tools and hooks; a skill is no process). "unused" = not once in the period, so
+# read it with a wide -d. The inventory is the tools/, skills/ and hooks/ folders next to this tool.
+# Cells are shaded by share of the busiest cell. Exit 2 on bad usage, 1 when no transcript is found.
 set -eu
+here=$(cd "$(dirname "$0")/.." && pwd)
 root=${CLAUDE_PROJECTS:-$HOME/.claude/projects}
-proj="" days=0
-while getopts hp:d: o; do
+proj="" days=0 per=month usage=0
+while getopts hup:d:b: o; do
 	case $o in
 		p) proj=$OPTARG ;;
 		d) case $OPTARG in *[!0-9]* | '') echo "heatmap: -d takes a number of days" >&2; exit 2 ;; esac; days=$OPTARG ;;
+		b) case $OPTARG in hour | day | month | year) per=$OPTARG ;; *) echo "heatmap: -b takes hour, day, month or year" >&2; exit 2 ;; esac ;;
+		u) usage=1 ;;
 		h) sed -n '2,/^set/{/^set/!s/^# \{0,1\}//p}' "$0"; exit 0 ;;
-		*) echo "usage: heatmap [-p NAME] [-d DAYS]" >&2; exit 2 ;;
+		*) echo "usage: heatmap [-b hour|day|month|year] [-u] [-p NAME] [-d DAYS]" >&2; exit 2 ;;
 	esac
 done
 command -v jq > /dev/null || { echo "heatmap: jq is needed" >&2; exit 2; }
 
-files=$(find "$root" -maxdepth 2 -name '*.jsonl' -path "*$proj*" 2> /dev/null) || true
+files=$(find "$root" -maxdepth 4 -name '*.jsonl' -path "*$proj*" \( -path '*/subagents/*' -o -path "$root/*/*.jsonl" \) 2> /dev/null) || true
 [ -n "$files" ] || { echo "heatmap: no transcripts under $root" >&2; exit 1; }
 since=0
 [ "$days" -gt 0 ] && since=$(($(date +%s) - days * 86400))
+tmp=$(mktemp) && trap 'rm -f "$tmp"' EXIT
 
-# one line per message: KIND WEEKDAY(1=Mon) HOUR YYYY-MM
+# one line per event: KIND EPOCH WEEKDAY(1=Mon) HOUR YYYY-MM-DD WHO MODEL NAME   (tab separated, empty = none)
+# kinds: msg (name empty), bash (name = the command, cut), skill, hook
 # shellcheck disable=SC2086
-data=$(cat $files | jq -r --argjson since "$since" '
-	select(.timestamp != null and (.type == "user" or .type == "assistant"))
-	| select(.type == "assistant" or .origin.kind == "human")
+cat $files | jq -r --argjson since "$since" '
+	def row(k; t; who; model; name):
+		[k, t, (t | localtime | strftime("%u\t%H\t%Y-%m-%d")), who, model, (name | gsub("[\t\n\r]"; " "))] | join("\t");
+	select(.timestamp != null)
 	| (.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) as $t
 	| select($t >= $since)
-	| [(if .type == "user" then "prompt" else "reply" end), ($t | localtime | strftime("%u %H %Y-%m"))] | join(" ")' 2> /dev/null)
-[ -n "$data" ] || { echo "heatmap: no messages in range" >&2; exit 1; }
+	| if .type == "user" and .origin.kind == "human" then row("msg"; $t; "you"; ""; "")
+	  elif .type == "assistant" then
+		row("msg"; $t; (if .isSidechain == true then "subagent" else "agent" end); (.message.model // "?"); ""),
+		( .message.content[]? | select(.type == "tool_use")
+		  | if .name == "Bash" then row("bash"; $t; ""; ""; (.input.command // "")[0:600])
+		    elif .name == "Skill" then row("skill"; $t; ""; ""; (.input.skill // ""))
+		    else empty end )
+	  elif .type == "attachment" and ((.attachment.type // "") | startswith("hook_")) and .attachment.command != null then
+		row("hook"; $t; ""; ""; (.attachment.command | sub("^.*/"; "")))
+	  elif .subtype == "stop_hook_summary" then
+		( .hookInfos[]? | row("hook"; $t; ""; ""; (.command | sub("^.*/"; "")) ) )
+	  else empty end' 2> /dev/null > "$tmp" || true
+grep -q '^msg' "$tmp" || { echo "heatmap: no messages in range" >&2; exit 1; }
 
-printf '%s\n' "$data" | awk -v color="$([ -t 1 ] && echo 1 || echo 0)" '
+if [ "$usage" = 1 ]; then
+	inv=$(
+		for f in "$here"/tools/*; do [ -f "$f" ] && echo "tool $(basename "$f")"; done
+		for f in "$here"/skills/*; do [ -d "$f" ] && echo "skill $(basename "$f")"; done
+		for f in "$here"/hooks/*; do [ -f "$f" ] && echo "hook $(basename "$f")"; done
+	)
+	# a snapshot of the processes, minus this script and what it spawned
+	procs=$(ps -eo pid=,ppid=,args= | awk -v me="$$" '$1 != me && $2 != me { $1 = $2 = ""; print }')
+	awk -F'\t' -v self="$(basename "$0")" -v days="$days" '
+	FILENAME == ARGV[1] { n++; ik[n] = $1; iname[n] = $2; next }
+	FILENAME == ARGV[2] { n2++; proc[n2] = $0; next }
+	{ if ($1 == "bash") { cmd[++nc] = $8; ct[nc] = $5 } else if ($1 == "skill" || $1 == "hook") { cnt[$1, $8]++; if ($5 > last[$1, $8]) last[$1, $8] = $5 } }
+	function esc(s) { gsub(/[][\\.^$*+?(){}|\/]/, "\\\\&", s); return s }
+	function isrun(kind, name,   i, k, a, p) {
+		if (kind == "skill") return "-"
+		if (name == self) return "-"
+		for (i = 1; i <= n2; i++) {
+			split(proc[i], a, " ")
+			for (k = 1; k <= 2 && k in a; k++) { p = a[k]; sub(/^.*\//, "", p); if (p == name) return "yes" }
+		}
+		return "no"
+	}
+	END {
+		for (i = 1; i <= n; i++) if (ik[i] == "tool") {
+			re = "(^|[^A-Za-z0-9_-])" esc(iname[i]) "([^A-Za-z0-9_-]|$)"
+			for (j = 1; j <= nc; j++) if (cmd[j] ~ re) { cnt["tool", iname[i]]++; if (ct[j] > last["tool", iname[i]]) last["tool", iname[i]] = ct[j] }
+		}
+		printf "usage in %s\n", (days > 0 ? "the last " days " days" : "all transcripts")
+		split("tool skill hook", kinds, " ")
+		for (q = 1; q <= 3; q++) {
+			k = kinds[q]; u = un = r = 0; lines = ""
+			for (i = 1; i <= n; i++) if (ik[i] == k) {
+				c = cnt[k, iname[i]] + 0; run = isrun(k, iname[i])
+				if (c > 0) u++; else un++
+				if (run == "yes") r++
+				lines = lines sprintf("  %-26s %-7s %6d  %-10s %s\n", iname[i], (c > 0 ? "used" : "unused"), c, (c > 0 ? last[k, iname[i]] : "-"), run)
+			}
+			printf "\n%ss: %d used, %d unused, %d running\n  %-26s %-7s %6s  %-10s %s\n", k, u, un, r, "name", "state", "uses", "last", "running"
+			printf "%s", lines | "sort -k3,3nr -k1,1"
+			close("sort -k3,3nr -k1,1")
+		}
+	}' <(printf '%s\n' "$inv" | tr ' ' '\t') <(printf '%s\n' "$procs") "$tmp"
+	exit 0
+fi
+
+awk -F'\t' -v color="$([ -t 1 ] && echo 1 || echo 0)" -v per="$per" '
 function shade(v, max,   r) {
 	if (!color) return sprintf("%4d", v)
 	r = max ? v / max : 0
 	return sprintf("\033[48;5;%dm%4d\033[0m", (v == 0 ? 236 : r < .25 ? 22 : r < .5 ? 28 : r < .75 ? 34 : 46), v)
 }
-{ k = $1; g[k, $2, $3 + 0]++; tot[k]++; m[k, $4]++; months[$4] = 1
-  if (g[k, $2, $3 + 0] > mx[k]) mx[k] = g[k, $2, $3 + 0] }
+function bucket(ymd, hh) {
+	if (per == "year") return substr(ymd, 1, 4)
+	if (per == "month") return substr(ymd, 1, 7)
+	if (per == "day") return ymd
+	return ymd " " hh ":00"
+}
+$1 == "msg" {
+	k = ($6 == "you" ? "prompt" : "reply")
+	g[k, $3, $4 + 0]++; tot[k]++
+	if (g[k, $3, $4 + 0] > mx[k]) mx[k] = g[k, $3, $4 + 0]
+	b = bucket($5, $4); bs[b] = 1; w[b, $6]++; who[$6]++
+	if ($6 != "you") mod[$7]++
+}
 END {
 	split("Mon Tue Wed Thu Fri Sat Sun", dn, " ")
 	n = split("prompt reply", kinds, " ")
@@ -59,9 +138,10 @@ END {
 			printf "\n"
 		}
 	}
-	printf "\nper month   prompts   replies\n"
-	c = 0
-	for (x in months) ms[++c] = x
-	for (i = 1; i <= c; i++) for (j = i + 1; j <= c; j++) if (ms[j] < ms[i]) { t = ms[i]; ms[i] = ms[j]; ms[j] = t }
-	for (i = 1; i <= c; i++) printf "%s  %8d  %8d\n", ms[i], m["prompt", ms[i]], m["reply", ms[i]]
-}'
+	printf "\nwho         messages\n  you       %8d\n  agent     %8d\n  subagent  %8d\n", who["you"], who["agent"], who["subagent"]
+	printf "\nmodel                           replies\n"
+	for (m in mod) printf "  %-30s %8d\n", m, mod[m] | "sort -k2,2nr"
+	close("sort -k2,2nr")
+	printf "\nper %-13s  you  agent  subagent\n", per
+	for (x in bs) printf "%-17s %5d %6d %9d\n", x, w[x, "you"], w[x, "agent"], w[x, "subagent"] | "sort"
+}' "$tmp"

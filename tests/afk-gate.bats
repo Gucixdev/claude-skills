@@ -5,6 +5,8 @@ setup() {
 	G=$BATS_TEST_DIRNAME/../hooks/afk-gate
 	export AFK_GATE_DIR=$BATS_TEST_TMPDIR/state
 	export AFK_GATE_TODO=$BATS_TEST_TMPDIR/todo.md
+	export AFK_GATE_PROJECTS=$BATS_TEST_TMPDIR/projects	# never the real sessions: they would count as his messages
+	mkdir -p "$AFK_GATE_PROJECTS"
 	printf '# todo\n\n1. old thing -> zrobione\n2. blocked on hardware (blocked)\n3. build the thing\n4. second thing\n' > "$AFK_GATE_TODO"
 }
 
@@ -79,19 +81,40 @@ transcript() {	# transcript SECONDS_AGO: a human message that old, then a task n
 }
 stop_t() { printf '{"hook_event_name":"Stop","transcript_path":"%s"}' "$1" | "$G"; }
 
-@test "auto: quiet longer than the limit blocks the stop at once" {
+@test "auto: the first stop waits the idle time from the stop, then blocks" {
 	t=$(transcript 700)
-	"$G" auto 10m
-	run stop_t "$t"
+	"$G" auto 2s
+	AFK_GATE_WAIT=20 AFK_GATE_POLL=1 run stop_t "$t"
 	[ "$status" -eq 2 ]
-	[[ $output == *"3. build the thing"* && $output == *"quiet for 11 minutes"* ]]
+	[[ $output == *"3. build the thing"* && $output == *"nobody did anything"* ]]
 }
 
 @test "auto: notifications and tool results do not reset the idle clock" {
-	t=$(transcript 700)
-	"$G" auto 10m
+	t=$(transcript 0)
+	"$G" auto 2s
+	( sleep 1; printf '{"type":"user","origin":{"kind":"task-notification"},"timestamp":"%s"}\n' \
+		"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "$t" ) &
+	AFK_GATE_WAIT=20 AFK_GATE_POLL=1 run stop_t "$t"
+	[ "$status" -eq 2 ]
+}
+
+@test "auto: once blocked and he has not written since, the next stop is blocked at once" {
+	t=$(transcript 0)
+	"$G" auto 2s
+	AFK_GATE_WAIT=20 AFK_GATE_POLL=1 run stop_t "$t"
+	[ "$status" -eq 2 ]
+	start=$(date +%s)
 	run stop_t "$t"
 	[ "$status" -eq 2 ]
+	[ $(($(date +%s) - start)) -lt 2 ]
+}
+
+@test "auto: another session wrote a moment ago: nobody is idle" {
+	t=$(transcript 700)
+	: > "$AFK_GATE_PROJECTS/other.jsonl"
+	"$G" auto 2s
+	AFK_GATE_WAIT=20 AFK_GATE_POLL=1 run stop_t "$t"
+	[ "$status" -eq 0 ]
 }
 
 @test "auto: he typed a moment ago, nothing waits forever: exit 0 after the wait" {

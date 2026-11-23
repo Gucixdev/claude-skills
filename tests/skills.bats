@@ -195,7 +195,9 @@ mkdoc() {	# mkdoc SKILL TEXT: a one-chunk reference file
 @test "skills retrieve: embeddings find a chunk that shares no word with the task, and the cache is reused until a file changes" {
 	REAL_HOME=$(getent passwd "$(id -u)" | cut -d: -f6)
 	export HF_HOME=${HF_HOME:-$REAL_HOME/.cache/huggingface} XDG_CACHE_HOME=$BATS_TEST_TMPDIR/cache PYTHONUSERBASE=${PYTHONUSERBASE:-$REAL_HOME/.local}
-	ls "$HF_HOME"/hub/models--sentence-transformers--all-MiniLM-L6-v2/snapshots/*/model.safetensors > /dev/null 2>&1 || skip "no local MiniLM in $HF_HOME"
+	# [ -f ] follows the snapshot symlinks: a cache whose blobs were cleaned has dangling links that ls still lists
+	for f in "$HF_HOME"/hub/models--sentence-transformers--all-MiniLM-L6-v2/snapshots/*/model.safetensors; do [ -f "$f" ] && have=1; done
+	[ "${have:-}" = 1 ] || skip "no local MiniLM in $HF_HOME (blobs missing or dangling)"
 	python3 -c 'import numpy, tokenizers, safetensors' 2> /dev/null || skip "numpy, tokenizers or safetensors missing"
 	mkdoc baking 'Mix flour, yeast and water, let the dough prove, bake at 230 degrees.'
 	mkdoc engines 'Drain the oil, change the filter, refill the sump with new oil.'

@@ -1,17 +1,17 @@
 ---
 name: whiteboard-programming
-description: Design before the keyboard - documentation first (describe every feature, close the scope) or proofs first (memory layout and invariants as Lean 4, then C), so risky optimizations become safe. Use when starting a project, designing a data structure, file format or interface, before a hard optimization, or on whiteboard, tablica, dowody najpierw, uklad pamieci.
+description: Design before the keyboard - documentation first (describe every feature, close the scope) or proofs first (memory layout and invariants as Lean 4, then C), so risky optimizations become safe. Use when starting a project, designing a data structure, file format or interface, before a hard optimization, or on whiteboard, tablica, dowody najpierw, uklad pamieci, ampl, minmax, optimal layout.
 metadata:
   priority: "1"
-  tags: "#dev #design #architecture #lean4 #formal #memory #performance #docs #c #dod #workflow"
-  requires: "skill:code ?cmd:lake"
+  tags: "#dev #design #architecture #lean4 #formal #memory #performance #docs #c #dod #workflow #ampl #optimization #minmax"
+  requires: "skill:code ?cmd:lake ?cmd:ampl"
 ---
 
 # whiteboard-programming
 
 His rule (2026-11-15): first proofs in Lean, only then code; or start from the documentation - a precise description of
 every feature, decide what is needed and what is not, and close projects that way. The keyboard comes last. Two doors,
-one order: **scope, layout, proof, code, close.**
+one order: **scope, layout, proof, numbers, code, close.**
 
 <!-- digest -->
 
@@ -68,6 +68,15 @@ lane split, a lock-free step. Glue, UI and I/O get tests instead. No `sorry`, no
 which links of the chain are proved (spec = model) and which are tested (model = C, by the differential test on every
 input where the domain is finite, seeded random elsewhere). Time-box a proof; a proof that does not close in a session
 is a signal the design is too clever - simplify the layout, not the theorem.
+
+## 3b. Numbers (AMPL, `references/ampl.md`)
+
+His decision (2026-11-23): AMPL is a standard here for the maths, logic and optimization only. Where the design asks
+"what is the best choice under these limits" (ergokeys layout, arena size classes, field order, chunk and thread
+counts, which checks fit a budget), write it as `ampl/NAME.mod` + measured `NAME.dat`, solve, and hold the C constant
+or heuristic to the optimum. Lean proves code = spec, AMPL shows spec = best, the benchmark shows it is fast. Final
+code stays C or Rust (Go, Python, bash where the ecosystem asks); AMPL is a check, never shipped. Install status, licence
+and the template are in the reference.
 
 ## 4. Code
 

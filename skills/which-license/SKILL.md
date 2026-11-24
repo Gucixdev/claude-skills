@@ -1,6 +1,6 @@
 ---
 name: which-license
-description: Pick a licence for his code and judge the licence of code he wants to reuse - MIT by default for maximum integration, 0BSD/Unlicense or MIT-or-public-domain for stb-style headers, Apache-2.0 only for the patent grant, GPL kept out of the tree. Use for LICENSE, SPDX, copyright, can I copy this code, fork, dwl/GPL, MIT, Apache, pizzaware.
+description: Pick a licence for his code and judge the licence of code he wants to reuse - MIT by default for maximum integration, 0BSD/Unlicense or MIT-or-public-domain for stb-style headers, Apache-2.0 only for the patent grant, GPL kept out of the tree (technique-only inspiration is fine, copying is not). Use for LICENSE, SPDX, copyright, can I copy this code, fork, dwl/GPL, MIT, Apache, pizzaware.
 metadata:
   priority: "2"
   tags: "#license #legal #publish #thirdparties #dev"
@@ -30,6 +30,13 @@ Avoid for his own code: GPL-2.0/3.0 and AGPL (they force every user to the same 
 - MIT, BSD, ISC, 0BSD, Zlib, Unlicense/CC0: copy freely into an MIT project; keep the copyright line and licence
   text (holyc keeps them in `THIRD_PARTY/` plus `THIRD_PARTY.md`).
 - Apache-2.0: fine in an MIT/Apache project, keep NOTICE; makes the combined work effectively Apache-governed.
+- His stance (2026-11-23, symbiotecpp): his goal is everything on MIT. Permissive code (MIT/BSD/Apache) may be copied,
+  or better rewritten "similarly, not 100 % whole", with the header/NOTICE kept. Copyleft code (GPL/AGPL/LGPL,
+  CC-NC, Polyform) is **inspiration only**: take the technique and the maths, write own code from that description,
+  no copied lines, helper names or comments; note what was learned in the project's references list, not in a code
+  header. Where a copyleft library has unique value, answer it with an own proof or measurement (Lean 4, AMPL,
+  benchmark), not a transcription. Closed source: behaviour and docs only. Check the real LICENSE file, README
+  badges can be wrong.
 - GPL/AGPL/LGPL: do not copy or fork into an MIT tree; the whole result must then be GPL. Calling such a program as
   a separate process (CLI, socket) is fine. A fork of GPL code stays GPL: that is why forking dwl (GPLv3, check its
   `LICENSE`) blocks MIT; wlroots, sway and tinywl are MIT/permissive, so an own compositor built on wlroots can be MIT.

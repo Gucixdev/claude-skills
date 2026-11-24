@@ -11,6 +11,12 @@
   output in his C tools goes through `colorado` (a stdin colourizer), not hardcoded escapes - real TUIs excepted.
 - Subcommands are verbs (`list`, `install`, `remove`); no arguments on an interactive tool opens the TUI.
 
+## Which toolkit (his decision 2026-11-24)
+
+lazyUI-rs (Gucixdev/lazyUI-rs) is the UI standard everywhere: native window, terminal, CLI and web, also CRUD and SaaS
+apps. Every Rust GUI (filem8, steamdeck_launcher, ...) and web product (fastkit) uses it. lazytui-c is the TUI toolkit for
+programs written in C: it grows too, but stays lighter than the Rust one (TUI only, minimal).
+
 ## TUI (lazytui)
 
 His `lib/lazytui` (fzf-based, in Gucixdev/bash) and the C library `lazyui/tui` set the conventions:

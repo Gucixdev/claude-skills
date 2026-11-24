@@ -65,6 +65,9 @@ for def/func/fn/class/export, or tags).
   normalisation, unless he says so.
   1. Name the axes before touching code - he names them, or the task implies them (a store: max queries/s, recall per
      byte, rows per TB; min RAM a row, bytes read a query, p99, binary size, code paths) - and say which were taken.
+  1b. When the axes trade off against each other (layout, size classes, budgets), write them as an AMPL model - one
+     objective, the rest constraints - and take the optimum as the target instead of tuning by feel. AMPL is the maths
+     check only, never shipped code (`whiteboard-programming` part ampl).
   2. Measure before and after every change, on the hardware it is for; a change that moves no chosen number is
      reverted (deletion beats addition). Spend where the profile points, not where it feels slow.
   3. Never buy a number with what "Never cut" protects, nor with honesty: report the numbers as measured.

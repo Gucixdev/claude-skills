@@ -69,7 +69,7 @@ niż na dysku kisić"):
 - `orchestrator` #agents #delegation #providers #llm #council #workflow #skills #routing #cli #mcp
 - `publish-anything` #publish #secrets #privacy #comments #github #release #security #quality
 - `skill-everything` #thirdparties #meta #skills #memory
-- `whiteboard-programming` #dev #design #architecture #lean4 #formal #memory #performance #docs #c #dod #workflow
+- `whiteboard-programming` #dev #design #architecture #lean4 #formal #memory #performance #docs #c #dod #workflow #ampl #optimization #minmax
 
 ### Priority 2 - load when the task is one of these
 - `alienspace` #thinking #research #ideas
@@ -77,6 +77,7 @@ niż na dysku kisić"):
 - `ask-older-brother` #agents #delegation #models #decisions #review #thinking
 - `audit-everything` #thirdparties #audit #review #security #quality #dev
 - `bash-everything` #thirdparties #bash #shell #cli #tui #rewrite #unix #dev
+- `cleandocs` #docs #quality #publish #dev
 - `cli-everything` #cli #rest #mcp #agents #bash #dev #thirdparties #automation #integration
 - `decide` #decisions #design #workflow #questions #thinking
 - `distribute-everything` #thirdparties #distribute #release #workflow #dev
@@ -92,6 +93,10 @@ niż na dysku kisić"):
 - `scrape-everything` #thirdparties #scraping #web #data #api #automation #dev
 - `seed` #scaffold #github #license #skills #dev
 - `ship-anything` #ship #release #publishing #business #dev #pack #build #linux
+- `teardown` #thirdparties #research #design #dev #business
 - `ui` #thirdparties #ui #ux #tui #cli #design #animation #dev #webdev #web #html #css #wasm #typescript #media #images #video #audio #fonts #3d #imagemagick #ffmpeg #assimp
 - `which-license` #license #legal #publish #thirdparties #dev
+
+### Priority 3 - only when he names it
+- `day-trader` #business #economy #thinking #measurement
 <!-- /skills:index -->

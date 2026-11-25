@@ -13,7 +13,8 @@
 #   identity   this machine's login name, home directory, and the git name and e-mail from the global and
 #              ~/.gitconfig.local config - read at run time, so the check itself carries no personal detail
 #   paths      /home/NAME, /Users/NAME and /data/dev style absolute paths in files (use $HOME, ~, $USER or a
-#              path relative to the script)
+#              path relative to the script). Made-up names pass: user, username, you, yourname, name, alice, bob,
+#              demo, me and single letters; the login name of this machine is still caught as identity
 #   filler     comment lines with the marks of generated text: emoji, "Let's", "Certainly", "robust",
 #              "seamless", "comprehensive", "leverage", "delve", "It's important to", "Note that", and the
 #              self-justifying phrases ("not theater", "honest gap", "documented, not hidden")
@@ -60,7 +61,7 @@ echo "== secrets =="
 		gitleaks dir . --no-banner --redact -l warn 2>&1 | grep -E 'File:|Line:|RuleID:' | paste - - -
 	else
 		scan -E 'gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9_-]{30,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
-		scan -iE '(passw(or)?d|secret|token|api[_-]?key)[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/+_.-]{8,}' |
+		scan -iE '(passw(or)?d|secret|token|api[_-]?key)[[:space:]]*[:=][[:space:]]*(["'"'"'][A-Za-z0-9/+_.-]{8,}|[A-Za-z0-9/+_.-]{8,}($|[^A-Za-z0-9/+_.(:-]|:($|[^:])))' |
 			grep -viE '\$\{?[A-Za-z_(]|<[a-z _-]+>|your[-_ ]|example|changeme|xxxx|\.\.\.|getenv|environ|read -|: *$'
 	fi
 	scan -E '://[^/[:space:]:@]+:[^/[:space:]@]+@[A-Za-z0-9.-]+'
@@ -78,7 +79,12 @@ echo "== identity =="
 if [ -s "${TMPDIR:-/tmp}/pc.$$" ]; then scan -iFf "${TMPDIR:-/tmp}/pc.$$" | report identity; fi
 
 echo "== paths =="
-scan -E '(/home|/Users)/[A-Za-z0-9_][A-Za-z0-9._-]*|/data/dev(/|$)' | grep -vE '/home/(user|username|you|name|\$|\{)|/Users/(user|username|you)' | report path
+# made-up names (/home/user, /home/demo, one letter) are taken out of the line first, then what is left is judged
+scan -E '(/home|/Users)/[A-Za-z0-9_][A-Za-z0-9._-]*|/data/dev(/|$)' | awk '{
+	t = $0
+	gsub(/(\/home|\/Users)\/(user|username|you|yourname|name|alice|bob|demo|me|[a-z])($|[^A-Za-z0-9._-])/, " ", t)
+	if (t ~ /(\/home|\/Users)\/[A-Za-z0-9_]|\/data\/dev(\/|$)/) print
+}' | report path
 
 echo "== filler =="
 {

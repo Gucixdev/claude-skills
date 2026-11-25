@@ -7,6 +7,8 @@
 #   afk-gate on [DURATION]   force: block every stop for DURATION (default 8h), however recently he typed
 #   afk-gate off             switch both off (also what he types as "! afk-gate off" when he is back)
 #   afk-gate status          mode, idle limit, time left, blocked stops so far
+#   afk-gate wlacz [IDLE]    the same as auto
+#   afk-gate wylacz          the same as off
 #
 # As the hook (no arguments, the Stop event's JSON on stdin): with neither mode on, expired or past the cap - exit 0,
 # Claude may stop. In auto mode the hook looks at the transcript (path in the JSON): the last entry written by a
@@ -82,7 +84,7 @@ other_busy() {	# other_busy TRANSCRIPT: another session wrote something in the l
 }
 
 case ${1:-} in
-auto)
+auto | wlacz)
 	s=$(seconds "${2:-10m}") || { echo "afk-gate: bad idle time '${2:-}' (like 10m or 90s)" >&2; exit 2; }
 	[ "$s" -gt 0 ] || { echo "afk-gate: idle time must be above zero" >&2; exit 2; }
 	mkdir -p "$dir" || exit 2
@@ -98,7 +100,7 @@ on)
 	echo 0 > "$dir/count"
 	echo "afk-gate: forced for $((s / 60)) minutes; Claude cannot stop while todo.md has open lines ($todo)"
 	exit 0 ;;
-off)
+off | wylacz)
 	rm -f -- "$dir/until" "$dir/idle" "$dir"/blocked_at.* "$dir"/quick.* 2> /dev/null
 	echo "afk-gate: off"
 	exit 0 ;;

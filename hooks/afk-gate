@@ -7,8 +7,8 @@
 #   afk-gate on [DURATION]   force: block every stop for DURATION (default 8h), however recently he typed
 #   afk-gate off             switch both off (also what he types as "! afk-gate off" when he is back)
 #   afk-gate status          mode, idle limit, time left, blocked stops so far
-#   afk-gate wlacz [IDLE]    the same as auto
-#   afk-gate wylacz          the same as off
+#
+# The switch is the line "enabled=..." below: set it to false and the hook never blocks, whatever mode is on.
 #
 # As the hook (no arguments, the Stop event's JSON on stdin): with neither mode on, expired or past the cap - exit 0,
 # Claude may stop. In auto mode the hook looks at the transcript (path in the JSON): the last entry written by a
@@ -28,6 +28,8 @@
 # (default $CLAUDE_CONFIG/todo.md). Exit status as a command: 0 fine, 2 bad usage.
 
 set -u
+
+enabled=${AFK_GATE_ENABLED:-true}	# true / false
 
 dir=${AFK_GATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/afk-gate}
 todo=${AFK_GATE_TODO:-${CLAUDE_CONFIG:-$HOME/.claude-config}/todo.md}
@@ -84,7 +86,7 @@ other_busy() {	# other_busy TRANSCRIPT: another session wrote something in the l
 }
 
 case ${1:-} in
-auto | wlacz)
+auto)
 	s=$(seconds "${2:-10m}") || { echo "afk-gate: bad idle time '${2:-}' (like 10m or 90s)" >&2; exit 2; }
 	[ "$s" -gt 0 ] || { echo "afk-gate: idle time must be above zero" >&2; exit 2; }
 	mkdir -p "$dir" || exit 2
@@ -100,11 +102,12 @@ on)
 	echo 0 > "$dir/count"
 	echo "afk-gate: forced for $((s / 60)) minutes; Claude cannot stop while todo.md has open lines ($todo)"
 	exit 0 ;;
-off | wylacz)
+off)
 	rm -f -- "$dir/until" "$dir/idle" "$dir"/blocked_at.* "$dir"/quick.* 2> /dev/null
 	echo "afk-gate: off"
 	exit 0 ;;
 status)
+	[ "$enabled" = true ] || { echo "afk-gate: disabled (enabled=false in $0)"; exit 0; }
 	l=$(left)
 	c=$(cat "$dir/count" 2> /dev/null || echo 0)
 	if [ -f "$dir/idle" ]; then echo "afk-gate: auto, idle limit $(($(cat "$dir/idle") / 60)) min, $c stops blocked"
@@ -118,6 +121,7 @@ status)
 esac
 
 [ -t 0 ] && { usage >&2; exit 2; }
+[ "$enabled" = true ] || exit 0
 input=$(cat)
 l=$(left)
 idle=$(cat "$dir/idle" 2> /dev/null || echo 0)

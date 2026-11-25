@@ -198,13 +198,12 @@ stop_t() { printf '{"hook_event_name":"Stop","transcript_path":"%s"}' "$1" | "$G
 	[[ $output != *"just a description"* ]]
 }
 
-@test "wlacz and wylacz switch the idle mode on and off" {
-	run "$G" wlacz 5m
-	[ "$status" -eq 0 ]
-	run "$G" status
-	[[ $output == "afk-gate: auto, idle limit 5 min"* ]]
-	run "$G" wylacz
-	[ "$output" = "afk-gate: off" ]
-	run stop
+@test "enabled=false: never blocks even with a mode on, and status says so" {
+	run "$G" on 1h
+	AFK_GATE_ENABLED=false run stop
 	[ "$status" -eq 0 ] && [ -z "$output" ]
+	AFK_GATE_ENABLED=false run "$G" status
+	[[ $output == "afk-gate: disabled"* ]]
+	run stop
+	[ "$status" -eq 2 ]
 }

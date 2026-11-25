@@ -4,6 +4,8 @@
 # covered, they would need their own matcher), except a remote matching $PUSH_GATE_ALLOW (a substring, e.g. his private backup repo, pushed after every round).
 # After he has said "push" in chat, the command carries the word itself: `PUSH_OK=1 git push ...` goes through.
 # Reads happen freely (git fetch, git log, gh ... view/list). Enable (you, in settings.json): hooks.PreToolUse, matcher "Bash".
+# On/off: PUSH_GATE=off in settings.json "env" lets every push through; on (the default) asks as above. publish_gate has its own switch.
+[ "${PUSH_GATE:-on}" = off ] && exit 0
 input=$(cat)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2> /dev/null)
 [ -n "$cmd" ] || exit 0

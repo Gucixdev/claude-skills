@@ -29,8 +29,9 @@ root=$(git -C "$dir" rev-parse --show-toplevel 2> /dev/null) || exit 0
 bad=''
 compgen -G "$root/LICENSE*" > /dev/null || compgen -G "$root/COPYING*" > /dev/null || bad+="
   no LICENSE file"
-if [ -f "$root/README.md" ]; then
-	grep -qiE '(^|[^[:alpha:]])xd([^[:alpha:]]|$)' "$root/README.md" && bad+="
+readme=$(find "$root" -maxdepth 1 -type f -iname readme.md | head -1)
+if [ -n "$readme" ]; then
+	grep -qiE '(^|[^[:alpha:]])xd([^[:alpha:]]|$)' "$readme" && bad+="
   README.md has an xD"
 else bad+="
   no README.md"; fi

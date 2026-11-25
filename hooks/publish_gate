@@ -3,7 +3,7 @@
 # asks WHETHER it may). On git push, gh pr create/merge, gh release create and gh repo create it checks the repo the
 # command runs in (the cwd, or the folder of a "cd DIR &&" or "git -C DIR" in front):
 #   - a LICENSE file exists;
-#   - README.md exists, is at most 100 lines and has no "xD";
+#   - README.md exists and has no "xD";
 #   - no tracked file carries the local login name ($USER) or the home folder ($HOME) - identity and machine paths
 #     never go public (rules (identity)); the scan is git grep over tracked files, the first hits are listed;
 #   - no tracked file holds something that looks like a key or token (the secret-guard patterns, over git grep);
@@ -30,9 +30,6 @@ bad=''
 compgen -G "$root/LICENSE*" > /dev/null || compgen -G "$root/COPYING*" > /dev/null || bad+="
   no LICENSE file"
 if [ -f "$root/README.md" ]; then
-	n=$(wc -l < "$root/README.md")
-	[ "$n" -le 100 ] || bad+="
-  README.md is $n lines (at most 100)"
 	grep -qiE '(^|[^[:alpha:]])xd([^[:alpha:]]|$)' "$root/README.md" && bad+="
   README.md has an xD"
 else bad+="

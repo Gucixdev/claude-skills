@@ -190,20 +190,16 @@ result() { jq -cn --arg id "$1" --argjson e "$2" '{type: "user", message: {conte
 	[ "$status" -eq 0 ]
 }
 
-@test "readmegate: over 100 lines or an xD is refused, a short clean README and other files pass" {
-	long=$(seq 1 120)
+@test "readmegate: an xD is refused, a clean README of any length and other files pass" {
+	long=$(seq 1 300)
 	run "$H/readmegate" < <(pre Write "$(jq -cn --arg f "$R/README.md" --arg c "$long" '{file_path: $f, content: $c}')")
-	[ "$status" -eq 2 ]
-	[[ $output == *"120 lines"* ]]
+	[ "$status" -eq 0 ]
 	run "$H/readmegate" < <(pre Write "$(jq -cn --arg f "$R/README.md" '{file_path: $f, content: "# x\nthis works XD\n"}')")
 	[ "$status" -eq 2 ]
 	[[ $output == *xD* ]]
-	run "$H/readmegate" < <(pre Write "$(jq -cn --arg f "$R/README.md" '{file_path: $f, content: "# x\nthis works\n"}')")
-	[ "$status" -eq 0 ]
+	run "$H/readmegate" < <(pre Edit "$(jq -cn --arg f "$R/README.md" '{file_path: $f, old_string: "a", new_string: "b xd"}')")
+	[ "$status" -eq 2 ]
 	run "$H/readmegate" < <(pre Write "$(jq -cn --arg f "$R/todo.md" --arg c "$long xD" '{file_path: $f, content: $c}')")
-	[ "$status" -eq 0 ]
-	seq 1 130 > "$R/README.md"
-	run "$H/readmegate" < <(pre Edit "$(jq -cn --arg f "$R/README.md" '{file_path: $f, old_string: "1\n2\n3", new_string: "1"}')")
 	[ "$status" -eq 0 ]
 }
 

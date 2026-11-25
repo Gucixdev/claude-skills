@@ -64,7 +64,12 @@ echo "== secrets =="
 		scan -iE '(passw(or)?d|secret|token|api[_-]?key)[[:space:]]*[:=][[:space:]]*(["'"'"'][A-Za-z0-9/+_.-]{8,}|[A-Za-z0-9/+_.-]{8,}($|[^A-Za-z0-9/+_.(:-]|:($|[^:])))' |
 			grep -viE '\$\{?[A-Za-z_(]|<[a-z _-]+>|your[-_ ]|example|changeme|xxxx|\.\.\.|getenv|environ|read -|: *$'
 	fi
-	scan -E '://[^/[:space:]:@]+:[^/[:space:]@]+@[A-Za-z0-9.-]+'
+	# a password sent to a reserved example host (RFC 2606) cannot be a real one; those URLs leave the line first
+	scan -E '://[^/[:space:]:@]+:[^/[:space:]@]+@[A-Za-z0-9.-]+' | awk '{
+		t = $0
+		gsub(/:\/\/[^\/ \t:@]+:[^\/ \t@]+@([A-Za-z0-9-]+\.)*(example(\.(com|org|net))?|invalid|test)($|[^A-Za-z0-9.-])/, " ", t)
+		if (t ~ /:\/\/[^\/ \t:@]+:[^\/ \t@]+@[A-Za-z0-9.-]/) print
+	}'
 } | sed -E 's/(ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|sk-|AKIA|xox.-)[A-Za-z0-9_-]+/\1.../g; s#(://[^:/@ ]+:)[^@ ]+@#\1...@#; s/([:=][[:space:]]*["'"'"']?)[A-Za-z0-9\/+_.-]{8,}/\1.../' | report secret
 
 echo "== identity =="

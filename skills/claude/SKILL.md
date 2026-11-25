@@ -79,6 +79,7 @@ niż na dysku kisić"):
 - `bash-everything` #thirdparties #bash #shell #cli #tui #rewrite #unix #dev
 - `cleandocs` #docs #quality #publish #dev
 - `cli-everything` #cli #rest #mcp #agents #bash #dev #thirdparties #automation #integration
+- `cpp` #cpp #dev #templates #raii #performance #abstractions
 - `decide` #decisions #design #workflow #questions #thinking
 - `distribute-everything` #thirdparties #distribute #release #workflow #dev
 - `economist` #thinking #business #economy #gamedev

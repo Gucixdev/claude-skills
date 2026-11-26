@@ -53,8 +53,10 @@ if [ -f "$cfg/questions.md" ]; then
 	cp -- "$cfg/questions.md" "$state/questions.last" 2> /dev/null
 fi
 skills=
-[ -f "$cfg/skills/claude/SKILL.md" ] &&
-	skills=$(awk '/^### Priority 0/ { f = 1; next } /^### / { f = 0 } f && /^- / { sub(/ #.*/, ""); sub(/^- /, ""); printf "%s ", $0 }' "$cfg/skills/claude/SKILL.md")
+map=$cfg/skills/claude/SKILL.md
+[ -f "$map" ] || map=$cfg/public/skills/claude/SKILL.md
+[ -f "$map" ] &&
+	skills=$(awk '/^### Priority 0/ { f = 1; next } /^### / { f = 0 } f && /^- / { sub(/ #.*/, ""); sub(/^- /, ""); printf "%s ", $0 }' "$map")
 
 printf 'session-start (%s):\n' "$(date '+%F %T')"
 [ -n "$next" ] && printf 'Top open line of todo.md: %s\n' "$next"

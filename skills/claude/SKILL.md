@@ -15,7 +15,8 @@ tooling are in `skill-everything`.
 
 ## How to use them
 
-1. Now: load every priority-0 skill below. They are short and apply to everything.
+1. Now: load `karpathy` first - the first standard - then every other priority-0 skill below. They are short and apply
+   to everything.
 2. When a task starts: match its words and its hashtags against the list (or `bin/skills ls '#tag'` in the repo) and
    load the matching priority-1 and priority-2 skills. Priority 3 only when he names it.
 3. Load what a skill `requires` (`skill:` entries) along with it. On his machine `bin/skills req NAME` checks the
@@ -60,6 +61,7 @@ niż na dysku kisić"):
 ### Priority 0 - always: load these at the start of every session
 - `claude` #meta #index #skills
 - `code` #dev #c #c89 #dod #performance #memory #bash #emacs #rust #go #mojo #architecture #code #python #perl #elisp #lisp #typescript #ruby #rails #thirdparties #ponytail #minmax #8020 #yagni #thinking #debugging #investigation #saas #crud #sqlite #business #webdev #leanctx #context #tokens #reading #caveman #output #chat #verify #testing #done #proof #quality #fuzzing #coverage #bench #measurement #lean4 #formal #verification #optimization
+- `karpathy` #dev #workflow #quality #code #thirdparties
 - `rules` #safety #files #trash #versions #git #identity #privacy #publishing #agents #delegation #workflow #thirdparties #cost #money #selfhost #dependencies #epistemic #calibration #confidence #honesty #numbers #research #clarification #questions #communication #docs #manpages #stubborn #github #commits #dev
 - `workflow` #session #autonomy #tasks #workflow #loop #testing #agents #delegation #ideas #notes #capture #design #thinking #reverse-engineering #dev #llm #providers #limits #council #models #review #decisions
 

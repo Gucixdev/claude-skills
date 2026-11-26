@@ -43,6 +43,7 @@ Priority 0 skills apply to every session; the others load when their tags match.
 | Skill | What it is for |
 |---|---|
 | `claude` | the map of all skills by priority and hashtag |
+| `karpathy` | the first standard: think before coding, simplicity first, surgical changes, goal-driven execution |
 | `rules` | standing rules: nothing deleted, push only when told, no leaked identity or secrets, calibrated claims, ask only when it changes the work |
 | `workflow` | working without check-ins, goal loops, braindump, brainstorm, councils of models |
 | `code` | short answers and cheap reads, build less (the ponytail ladder), language choice, data-oriented C, real runs, tests, benchmarks, Lean 4 for optimized C |

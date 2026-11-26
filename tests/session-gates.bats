@@ -130,3 +130,11 @@ tool() { jq -cn --arg n "$1" --arg f "$2" '{type:"assistant",message:{content:[{
 	MEMORIZE_GATE=off run "$H/memorize-gate" < <(ev Stop)
 	[ "$status" -eq 0 ]
 }
+
+@test "session-start: the priority-0 skills are found when the config repo holds them under public/" {
+	mkdir -p "$T/cfg/public"
+	mv "$T/cfg/skills" "$T/cfg/public/skills"
+	run env SESSION_CONFIG_DIR="$T/cfg" SESSION_REPOS="$T/repos" SESSION_GATE_DIR="$T/gate" "$BATS_TEST_DIRNAME/../hooks/session-start" < /dev/null
+	[ "$status" -eq 0 ]
+	[[ $output == *"Load the priority-0 skills now: "*'`code`'* ]]
+}
